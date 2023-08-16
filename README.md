@@ -1,7 +1,7 @@
 <p align="center" style="font-size:300%">
 <img src=".static/powerbi.svg" width="200px" align="center">
 <img src=".static/clickhouse.svg" width="180px" align="center">
-<h1 align="center">Power BI Connector for ClickHouse</h1>
+<h1 align="center">ClickHouse Connector for Power BI</h1>
 </p>
 <br/>
 
