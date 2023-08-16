@@ -127,7 +127,7 @@ shared ClickHouseODBCConnector.Database = Value.ReplaceType(DatabaseCoreImplemen
 DatabaseType = type function (
     server as (type text meta [
         Documentation.FieldCaption = "Server",
-        Documentation.FieldDescription = "Name of ClickHouse Server (name only, without prefixes",
+        Documentation.FieldDescription = "Name of your ClickHouse Server (machine name only, without prefixes/suffixes)",
         Documentation.SampleValues = {"play.clickhouse.com"}        
     ]),
      port as (type number meta [
