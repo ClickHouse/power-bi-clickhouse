@@ -127,8 +127,8 @@ shared ClickHouseODBCConnector.Database = Value.ReplaceType(DatabaseCoreImplemen
 DatabaseType = type function (
     server as (type text meta [
         Documentation.FieldCaption = "Server",
-        Documentation.FieldDescription = "Name of your ClickHouse Server (machine name only, without prefixes/suffixes)",
-        Documentation.SampleValues = {"play.clickhouse.com"}        
+        Documentation.FieldDescription = "Name of ClickHouse Server (name only, without prefixes",
+        Documentation.SampleValues = {"play.clickhouse.com"}
     ]),
      port as (type number meta [
         Documentation.FieldCaption = "Port",
@@ -249,7 +249,7 @@ let
                 }
 
 
-                
+
 
                 // Some data sources may support setting separate timeout values for Connect and Command timeouts
                 // {"CommandTimeout", type nullable number, "non-negative integers", null, each _ = null or (_ >= 0 and Number.RoundDown(_) = _)}
@@ -267,7 +267,7 @@ let
             // names might be different for your data source.
             Server = server,
 
-            Port = 8443 ,
+            Port = port ,
             Database = database,  
             
             // These fields come from the options record, so they might be null.
