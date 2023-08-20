@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.33927.289
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{4DF76451-A46A-4C0B-BE03-459FAAFA07E6}") = "ClickHouseConnector", "ClickHouseConnector.mproj", "{C1533C08-BA1C-4FCD-BDFD-205DB90C18CA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Debug|x86 = Debug|x86
+		Release|Any CPU = Release|Any CPU
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C1533C08-BA1C-4FCD-BDFD-205DB90C18CA}.Debug|Any CPU.ActiveCfg = Release|x86
+		{C1533C08-BA1C-4FCD-BDFD-205DB90C18CA}.Debug|Any CPU.Build.0 = Release|x86
+		{C1533C08-BA1C-4FCD-BDFD-205DB90C18CA}.Debug|x86.ActiveCfg = Release|x86
+		{C1533C08-BA1C-4FCD-BDFD-205DB90C18CA}.Debug|x86.Build.0 = Release|x86
+		{C1533C08-BA1C-4FCD-BDFD-205DB90C18CA}.Release|Any CPU.ActiveCfg = Release|x86
+		{C1533C08-BA1C-4FCD-BDFD-205DB90C18CA}.Release|Any CPU.Build.0 = Release|x86
+		{C1533C08-BA1C-4FCD-BDFD-205DB90C18CA}.Release|x86.ActiveCfg = Release|x86
+		{C1533C08-BA1C-4FCD-BDFD-205DB90C18CA}.Release|x86.Build.0 = Release|x86
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C3654E7A-FCA4-41FE-AAE8-979A9172684F}
+	EndGlobalSection
+EndGlobal
