@@ -1,6 +1,6 @@
 <p align="center" style="font-size:300%">
+<img src=".static/clickhouse.png" width="200px" align="center">
 <img src=".static/powerbi.svg" width="200px" align="center">
-<img src=".static/clickhouse.svg" width="180px" align="center">
 <h1 align="center">ClickHouse Connector for Power BI</h1>
 </p>
 <br/>
@@ -30,12 +30,8 @@ This connector allows you to retrieve data from ClickHouse directly into Power B
 
 ## Documentation
 
-For more information about the ClickHouseODBCConnector functions, configuration options, and usage examples, refer to the [official documentation](link-to-documentation).
+For more information about the ClickHouseODBCConnector functions, configuration options, and usage examples, refer to the [official documentation](https://clickhouse.com/docs/en/integrations/powerbi).
 
 ## Support and Feedback
 
 If you encounter any issues or have feedback regarding the Power BI Connector for ClickHouse, please [submit an issue on GitHub](https://github.com/ClickHouse/power-bi-clickhouse/issues).
-
-## License
-
-This connector is licensed under the [Apache 2.0 License](https://www.apache.org/licenses/LICENSE-2.0).
