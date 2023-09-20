@@ -353,23 +353,53 @@ let
         // The sample implementation provided here will simply output the original table
         // to the user trace log, without any modification.
         SQLColumns = (catalogName, schemaName, tableName, columnName, source) =>
-            if (EnableTraceOutput <> true) then
-                source
-            else
-            // the if statement conditions will force the values to evaluated/written to diagnostics
-            if (
-                Diagnostics.LogValue("SQLColumns.TableName", tableName) <> "***"
-                and Diagnostics.LogValue("SQLColumns.ColumnName", columnName) <> "***"
-            ) then
-                let
-                    // Outputting the entire table might be too large, and result in the value being truncated.
-                    // We can output a row at a time instead with Table.TransformRows()
-                    rows = Table.TransformRows(source, each Diagnostics.LogValue("SQLColumns", _)),
-                    toTable = Table.FromRecords(rows)
-                in
-                    Value.ReplaceType(toTable, Value.Type(source))
-            else
-                source,
+            let
+                    OdbcSqlType.BIT = -7,
+                    OdbcSqlType.BOOLEAN = 249,
+                    OdbcSqlType.SQL_GUID = -11,
+                    OdbcSqlType.UUID = 245,
+                    OdbcSqlType.SQL_TINYINT = -6,
+                    OdbcSqlType.INT8 = 250,
+                    OdbcSqlType.SQL_BIGINT = -5,
+                    OdbcSqlType.INT64 = 251,
+                    FixDataType = (dataType) =>
+                        if dataType = OdbcSqlType.BOOLEAN then
+                            OdbcSqlType.BIT
+                        else if dataType = OdbcSqlType.UUID then
+                            OdbcSqlType.SQL_GUID
+                        else if dataType = OdbcSqlType.INT8 then
+                            OdbcSqlType.SQL_TINYINT                            
+                        else if dataType = OdbcSqlType.INT64 then
+                            OdbcSqlType.SQL_BIGINT
+                        else
+                            dataType,
+                    FixDataTypeName = (dataTypeName) =>
+                        if dataTypeName = "TEXT" then
+                            "SQL_WVARCHAR"
+                        else if dataTypeName = "CHAR" then
+                            "SQL_WCHAR"
+                        else
+                            dataTypeName,
+                    Transform = Table.TransformColumns(source, {{"DATA_TYPE", FixDataType}
+//                     , {"TYPE_NAME", FixDataTypeName}
+                    })
+           in
+                    if (EnableTraceOutput <> true) then
+                        Transform
+                    else if (
+                        // the if statement conditions will force the values to evaluated/written to diagnostics
+                        Diagnostics.LogValue("SQLColumns.TableName", tableName) <> "***"
+                        and Diagnostics.LogValue("SQLColumns.ColumnName", columnName) <> "***"
+                    ) then
+                        let
+                            // Outputting the entire table might be too large, and result in the value being truncated.
+                            // We can output a row at a time instead with Table.TransformRows()
+                            rows = Table.TransformRows(Transform, each Diagnostics.LogValue("SQLColumns", _)),
+                            toTable = Table.FromRecords(rows)
+                        in
+                            Value.ReplaceType(toTable, Value.Type(Transform))
+                    else
+                        Transform,
         // Remove null fields from the ConnectionString
         ConnectionStringNoNulls = Record.SelectFields(
             ConnectionString, Table.SelectRows(Record.ToTable(ConnectionString), each [Value] <> null)[Name]
