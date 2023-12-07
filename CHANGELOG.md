@@ -1,5 +1,11 @@
 # ClickHouse PowerBI Connector changelog
 
+
+## 0.1.2-beta, 2023-12-07
+### Bug fixes
+- Fix test connection handler gateway usage. [#5](https://github.com/ClickHouse/power-bi-clickhouse/issues/5) + [#3](https://github.com/ClickHouse/power-bi-clickhouse/issues/3)
+- Rename connector 
+
 ## 0.1.1-beta, 2023-09-20
 ### Bug fixes
 - Fix data types mapping issue. [#1](https://github.com/ClickHouse/power-bi-clickhouse/issues/1)
