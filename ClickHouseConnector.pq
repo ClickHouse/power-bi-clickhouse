@@ -2,8 +2,8 @@
 // based on an ODBC driver. It is meant as a template for other
 // ODBC based connectors that require similar functionality.
 //
-[Version = "1.0.0"]
-section ClickHouseODBCConnector;
+[Version = "0.1.2"]
+section ClickHouse;
 
 // When set to true, additional trace information will be written out to the User log.
 // This should be set to false before release. Tracing is done through a call to
@@ -118,8 +118,8 @@ Config_UseCastInsteadOfConvert = null;
 Config_EnableDirectQuery = true;
 
 // true, false
-[DataSource.Kind = "ClickHouseODBCConnector", Publish = "ClickHouseODBCConnector.Publish"]
-shared ClickHouseODBCConnector.Database = Value.ReplaceType(DatabaseCoreImplementation, DatabaseType);
+[DataSource.Kind = "ClickHouse", Publish = "ClickHouse.Publish"]
+shared ClickHouse.Database = Value.ReplaceType(DatabaseCoreImplementation, DatabaseType);
 
 
 
@@ -146,25 +146,15 @@ DatabaseType = type function (
         Documentation.SampleValues = {"Timeout=600;UseUnicode=true","UseUnicode=true"}
     ]))
     as table meta [
-        Documentation.Name = "ClickHouseODBCConnector",
+        Documentation.Name = "ClickHouse",
         Documentation.LongDescription = "ClickHouse ODBC connector for Power Query",
          Documentation.Examples = {[
             Description = "Returns a navigation table with list of play.clickhouse.com tables, that can be folded",
-            Code = "ClickHouseODBCConnector.Database(""https://play.clickhouse.com"")"
+            Code = "ClickHouse.Database(""https://play.clickhouse.com"")"
         ]}
     ];
 
 
-
-
-
-
-    // For future compatability
-[DataSource.Kind="ClickHouseConnector"]
-shared ClickHouseConnector.Contents = (server as text, port as number, optional database as text, optional options as record) =>
-    let
-        db = DatabaseCoreImplementation(server, port, database, options)
-        in db;
 
 DatabaseCoreImplementation = (server as text, port as number, optional database as text, optional options as record) =>
 let
@@ -434,27 +424,7 @@ let
 // Data Source Kind description
 
 
-ClickHouseConnector = [
-     TestConnection = (dataSourcePath) => 
-        let
-            json = Json.Document(dataSourcePath),
-            server = json[server],
-            port = json[port],
-            database = json[database]
-        in
-            { "ClickHouseConnector.Contents", server, port, database }, 
-    Authentication = [
-        // Key = [],
-        UsernamePassword = []
-        // Windows = [],
-        //Implicit = []
-    ],
-    SupportsEncryption = true,
-    Label = Extension.LoadString("DataSourceLabel")
-];
-
-
-ClickHouseODBCConnector = [
+ClickHouse = [
     // Set the TestConnection handler to enable gateway support.
     // The TestConnection handler will invoke your data source function to
     // validate the credentials the user has provider. Ideally, this is not
@@ -466,12 +436,9 @@ ClickHouseODBCConnector = [
         let
             json = Json.Document(dataSourcePath),
             server = json[server],
-            port = json[port],
-            database = json[database],
-            options = json[options]
-            // name of function parameter
+            port = json[port]
         in
-            {"ClickHouseODBCConnector.Database", server, port, database, options},
+            {"ClickHouse.Database", server, port},
     // Set supported types of authentication
     Authentication = [
         //Windows = [],
@@ -482,17 +449,17 @@ ClickHouseODBCConnector = [
 ];
 
 // Data Source UI publishing description
-ClickHouseODBCConnector.Publish = [
+ClickHouse.Publish = [
     Beta = true,
     Category = "Database",
     ButtonText = {Extension.LoadString("ButtonTitle"), Extension.LoadString("ButtonHelp")},
     LearnMoreUrl = "https://clickhouse.com",
     SupportsDirectQuery = Config_EnableDirectQuery,
-     SourceImage = ClickHouseODBCConnector.Icons,
-     SourceTypeImage = ClickHouseODBCConnector.Icons
+     SourceImage = ClickHouse.Icons,
+     SourceTypeImage = ClickHouse.Icons
 ];
 
-ClickHouseODBCConnector.Icons = [
+ClickHouse.Icons = [
     Icon16 = {
         Extension.Contents("ClickHouseConnector16.png"),
         Extension.Contents("ClickHouseConnector20.png"),
@@ -506,34 +473,6 @@ ClickHouseODBCConnector.Icons = [
         Extension.Contents("ClickHouseConnector64.png")
     }
 ];
-
-// Data Source UI publishing description
-ClickHouseConnector.Publish = [
-    Beta = true,
-    Category = "Database",
-    ButtonText = { Extension.LoadString("ButtonTitle"), Extension.LoadString("ButtonHelp") },
-    LearnMoreUrl = "https://powerbi.microsoft.com/",
-    SupportsDirectQuery = Config_EnableDirectQuery,
-    SourceImage = ClickHouseConnector.Icons,
-    SourceTypeImage = ClickHouseConnector.Icons
-];
-
-
-ClickHouseConnector.Icons = [
-    Icon16 = {
-        Extension.Contents("ClickHouseConnector16.png"),
-        Extension.Contents("ClickHouseConnector20.png"),
-        Extension.Contents("ClickHouseConnector24.png"),
-        Extension.Contents("ClickHouseConnector32.png")
-    },
-    Icon32 = {
-        Extension.Contents("ClickHouseConnector32.png"),
-        Extension.Contents("ClickHouseConnector40.png"),
-        Extension.Contents("ClickHouseConnector48.png"),
-        Extension.Contents("ClickHouseConnector64.png")
-    }
-];
-
 
 
 
