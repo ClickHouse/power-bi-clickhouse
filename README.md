@@ -28,6 +28,9 @@ This connector allows you to retrieve data from ClickHouse directly into Power B
 5. Choose the desired data retrieval mode: Import or Direct Query.
 6. Click "OK" to establish the connection and start working with ClickHouse data in Power BI.
 
+## Power BI Service
+For cloud usage, please refer to [Microsoft documentation](https://learn.microsoft.com/en-us/power-bi/connect-data/service-gateway-custom-connectors#enable-and-use-custom-connectors) for information on enabling custom data connectors in the cloud using on-premises data gateway.
+
 ## Documentation
 
 For more information about the ClickHouseODBCConnector functions, configuration options, and usage examples, refer to the [official documentation](https://clickhouse.com/docs/en/integrations/powerbi).
