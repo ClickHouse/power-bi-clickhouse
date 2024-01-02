@@ -245,7 +245,14 @@ let
                 // {"CommandTimeout", type nullable number, "non-negative integers", null, each _ = null or (_ >= 0 and Number.RoundDown(_) = _)}
             }
         ),
-        ValidatedOptions = ValidateOptions(options, ValidOptionsMap),
+
+        parsedOptions = if(Type.Is(Value.Type(options), type nullable text))
+                            then ConvertOptionsStringToRecord(options, ValidOptionsMap)
+                        else if (Type.Is(Value.Type(options), type record))
+                        then options
+                        else [],
+
+        ValidatedOptions = ValidateOptions(parsedOptions, ValidOptionsMap),
         //
         // Connection string settings
         //
