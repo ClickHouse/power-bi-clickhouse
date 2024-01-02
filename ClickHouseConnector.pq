@@ -140,7 +140,7 @@ DatabaseType = type function (
         Documentation.FieldDescription = "Name of ClickHouse database",
         Documentation.SampleValues = {"default"}  
     ]),    
-    optional advoptions as (type text meta [
+    optional options as (type text meta [
         Documentation.FieldCaption = "Options",
         Documentation.FieldDescription = "Additional connection string options separated by semicolon",
         Documentation.SampleValues = {"Timeout=600;UseUnicode=true","UseUnicode=true"}
@@ -156,7 +156,7 @@ DatabaseType = type function (
 
 
 
-DatabaseCoreImplementation = (server as text, port as number, optional database as text, optional options as record) =>
+DatabaseCoreImplementation = (server as text, port as number, optional database as text, optional options as any) =>
 let
         // Many data sources accept an optional 'options' record that allows users to change
         // default behaviors about the connection, such as connection timeout. Use this map
