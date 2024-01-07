@@ -246,7 +246,7 @@ let
             }
         ),
 
-        parsedOptions = if(Type.Is(Value.Type(options), type nullable text))
+        parsedOptions = if(Type.Is(Value.Type(options), type text))
                             then ConvertOptionsStringToRecord(options, ValidOptionsMap)
                         else if (Type.Is(Value.Type(options), type record))
                         then options
