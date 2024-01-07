@@ -1,5 +1,9 @@
 # ClickHouse PowerBI Connector changelog
 
+## 0.1.3-beta, 2024-01-02
+### Bug fixes
+- Fix ODBC options parsing. [#11](https://github.com/ClickHouse/power-bi-clickhouse/issues/11)
+- Rename output mez file
 
 ## 0.1.2-beta, 2023-12-07
 ### Bug fixes

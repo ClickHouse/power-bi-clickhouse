@@ -2,7 +2,7 @@
 // based on an ODBC driver. It is meant as a template for other
 // ODBC based connectors that require similar functionality.
 //
-[Version = "0.1.2"]
+[Version = "0.1.3"]
 section ClickHouse;
 
 // When set to true, additional trace information will be written out to the User log.
@@ -140,7 +140,7 @@ DatabaseType = type function (
         Documentation.FieldDescription = "Name of ClickHouse database",
         Documentation.SampleValues = {"default"}  
     ]),    
-    optional advoptions as (type text meta [
+    optional options as (type text meta [
         Documentation.FieldCaption = "Options",
         Documentation.FieldDescription = "Additional connection string options separated by semicolon",
         Documentation.SampleValues = {"Timeout=600;UseUnicode=true","UseUnicode=true"}
@@ -156,7 +156,7 @@ DatabaseType = type function (
 
 
 
-DatabaseCoreImplementation = (server as text, port as number, optional database as text, optional options as record) =>
+DatabaseCoreImplementation = (server as text, port as number, optional database as text, optional options as any) =>
 let
         // Many data sources accept an optional 'options' record that allows users to change
         // default behaviors about the connection, such as connection timeout. Use this map
@@ -245,7 +245,14 @@ let
                 // {"CommandTimeout", type nullable number, "non-negative integers", null, each _ = null or (_ >= 0 and Number.RoundDown(_) = _)}
             }
         ),
-        ValidatedOptions = ValidateOptions(options, ValidOptionsMap),
+
+        parsedOptions = if(Type.Is(Value.Type(options), type text))
+                            then ConvertOptionsStringToRecord(options, ValidOptionsMap)
+                        else if (Type.Is(Value.Type(options), type record))
+                        then options
+                        else [],
+
+        ValidatedOptions = ValidateOptions(parsedOptions, ValidOptionsMap),
         //
         // Connection string settings
         //
@@ -474,6 +481,48 @@ ClickHouse.Icons = [
     }
 ];
 
+
+ConvertOptionsStringToRecord = (optionsString as text, ValidOptionsMap as table) as record =>
+        let
+            // Split the options string into rows
+            optionRows = Text.Split(optionsString, ";"),
+
+            // Split each row into key-value pairs
+            keyValuePairs = List.Transform(optionRows, each Text.Split(_, "=")),
+
+            flattenedList = List.Combine(keyValuePairs),
+
+            extractedOptionsFromMap = List.Select(ValidOptionsMap[Name], each List.Contains(keyValuePairs, {_, _})),
+            // Identify keys from optionsString that don't exist in ValidOptionsMap
+        invalidKeys = List.Difference(List.Transform(keyValuePairs, each Text.Clean(Text.Trim(_{0}))), ValidOptionsMap[Name]),
+        extractedOptionsRecord = Record.FromList(List.Alternate(flattenedList, 1, 1), List.Alternate(flattenedList, 1, 1, 1)),
+        
+
+        optionsToTransform = Table.SelectRows(ValidOptionsMap, each (not Type.Is([Type],type nullable text) and not Type.Is([Type],type text))),
+        typeTransformations = Table.AddColumn(optionsToTransform , "Value", each 
+                                                                if (Type.Is([Type], type nullable number)) or (Type.Is([Type], type number)) 
+                                                                    then { [Name], Number.FromText}
+                                                                else if (Type.Is([Type], type nullable logical)) or (Type.Is([Type], type logical)) 
+                                                                    then { [Name], Logical.FromText}
+                                                                else null),
+
+
+        convertedRecord = Record.TransformFields(extractedOptionsRecord,Table.Column(typeTransformations,"Value"),MissingField.Ignore),
+             optionsRecordStr = Text.Combine(
+        List.Transform(Record.FieldNames(convertedRecord), each Text.From(_ & " = " & Text.From(Record.Field(convertedRecord, _)))),
+        ", ")
+        in
+                if not List.IsEmpty(invalidKeys) then
+                error Error.Record("Expression.Error", 
+                    Text.Format(
+                    "'#{0}' unvalid options were provided. Valid options are: '#{1}'",
+                    {Text.Combine(invalidKeys, ", "), Text.Combine(ValidOptionsMap[Name], ", ")}
+                )
+                   
+                )
+        
+        else
+            convertedRecord;
 
 
 // build settings based on configuration variables

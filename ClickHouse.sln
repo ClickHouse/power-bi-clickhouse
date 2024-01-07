@@ -1,0 +1,37 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.33927.289
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{4DF76451-A46A-4C0B-BE03-459FAAFA07E6}") = "ClickHouse", "ClickHouse.mproj", "{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Debug|x86 = Debug|x86
+		PowerBI|Any CPU = PowerBI|Any CPU
+		PowerBI|x86 = PowerBI|x86
+		Release|Any CPU = Release|Any CPU
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}.Debug|Any CPU.ActiveCfg = Release|x86
+		{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}.Debug|Any CPU.Build.0 = Release|x86
+		{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}.Debug|x86.ActiveCfg = Release|x86
+		{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}.Debug|x86.Build.0 = Release|x86
+		{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}.PowerBI|Any CPU.ActiveCfg = PowerBI|x86
+		{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}.PowerBI|Any CPU.Build.0 = PowerBI|x86
+		{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}.PowerBI|x86.ActiveCfg = PowerBI|x86
+		{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}.PowerBI|x86.Build.0 = PowerBI|x86
+		{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}.Release|Any CPU.ActiveCfg = Release|x86
+		{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}.Release|Any CPU.Build.0 = Release|x86
+		{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}.Release|x86.ActiveCfg = Release|x86
+		{75F0F14C-43C7-4477-AB24-C9FA5D5700AE}.Release|x86.Build.0 = Release|x86
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C3654E7A-FCA4-41FE-AAE8-979A9172684F}
+	EndGlobalSection
+EndGlobal
