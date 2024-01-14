@@ -2,7 +2,7 @@
 // based on an ODBC driver. It is meant as a template for other
 // ODBC based connectors that require similar functionality.
 //
-[Version = "0.1.3"]
+[Version = "0.1.4"]
 section ClickHouse;
 
 // When set to true, additional trace information will be written out to the User log.
