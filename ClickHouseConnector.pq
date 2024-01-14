@@ -2,7 +2,7 @@
 // based on an ODBC driver. It is meant as a template for other
 // ODBC based connectors that require similar functionality.
 //
-[Version = "0.1.3"]
+[Version = "0.1.4"]
 section ClickHouse;
 
 // When set to true, additional trace information will be written out to the User log.
@@ -313,7 +313,8 @@ let
                     // The values below are required for the SQL Native Client ODBC driver, but might
                     // not be required for your data source.
                     SQL_SQL92_PREDICATES = ODBC[SQL_SP][All],
-                    SQL_AGGREGATE_FUNCTIONS = ODBC[SQL_AF][All]
+                    SQL_AGGREGATE_FUNCTIONS = ODBC[SQL_AF][All],
+                    SQL_CONVERT_FUNCTIONS = 0x00000002 // Tell PowerBI that ClickHouse uses cast and not convert
                 ]
         ),
         // SQLGetTypeInfo can be specified in two ways:
@@ -421,8 +422,7 @@ let
             ]
         ),
         // without this filter, the user will get all databases 
-       OdbcDatasourceForSelectedDatabase = Table.SelectRows(OdbcDatasource, each [Name] = database or database = null) 
-
+       OdbcDatasourceForSelectedDatabase = Table.SelectRows(OdbcDatasource, each [Name] = database or database = null)
     in
         OdbcDatasourceForSelectedDatabase;
 
