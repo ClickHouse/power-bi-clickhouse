@@ -422,8 +422,7 @@ let
             ]
         ),
         // without this filter, the user will get all databases 
-       OdbcDatasourceForSelectedDatabase = Table.SelectRows(OdbcDatasource, each [Name] = database or database = null) 
-
+       OdbcDatasourceForSelectedDatabase = Table.SelectRows(OdbcDatasource, each [Name] = database or database = null)
     in
         OdbcDatasourceForSelectedDatabase;
 
