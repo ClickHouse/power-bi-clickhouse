@@ -5,7 +5,6 @@
 </p>
 <br/>
 
-
 ## Introduction
 
 This connector allows you to retrieve data from ClickHouse directly into Power BI for analysis and visualization.
@@ -17,18 +16,18 @@ This connector allows you to retrieve data from ClickHouse directly into Power B
 
 ## Installation
 
-
-1. Donwload and install [ClickHouse ODBC driver](https://github.com/ClickHouse/clickhouse-odbc).
-2. Create the following directory for the custom connector  "[Documents]\Power BI Desktop\Custom Connectors directory"
-2. Download the latest release of the Power BI Connector for ClickHouse from the [Releases section](https://github.com/ClickHouse/power-bi-clickhouse/releases) and place it in the directory you just created.
-2. Enable unsigned connectors loading - File -> Options and settings -> Options -> Security -> Data Extensions -> Allow any extension to load without warning or validation.
-3. Click on "Get Data" and search for "ClickHouseODBCConnector."
-4. Enter the required connection details, such as server name, port, database name, and optional connection options.
-5. Enter your user name and password.
-5. Choose the desired data retrieval mode: Import or Direct Query.
-6. Click "OK" to establish the connection and start working with ClickHouse data in Power BI.
+1. Download and install the [ClickHouse ODBC driver](https://github.com/ClickHouse/clickhouse-odbc).
+1. Create the following directory for the custom connector "Documents\Power BI Desktop\Custom Connectors directory".
+1. Download the latest release of the Power BI Connector for ClickHouse from the [Releases](https://github.com/ClickHouse/power-bi-clickhouse/releases) section and place it in the directory you just created.
+1. Enable unsigned connectors loading in File &rarr; Options and settings &rarr; Options &rarr; Security &rarr; Data Extensions &rarr; Allow any extension to load without warning or validation.
+1. Click on "Get Data" and search for "ClickHouseODBCConnector."
+1. Enter the required connection details, such as server name, port, database name, and optional connection options.
+1. Enter your username and password.
+1. Choose the desired data retrieval mode: Import or Direct Query.
+1. Click "OK" to establish the connection and start working with ClickHouse data in Power BI.
 
 ## Power BI Service
+
 For cloud usage, please refer to [Microsoft documentation](https://learn.microsoft.com/en-us/power-bi/connect-data/service-gateway-custom-connectors#enable-and-use-custom-connectors) for information on enabling custom data connectors in the cloud using on-premises data gateway.
 
 ## Documentation
