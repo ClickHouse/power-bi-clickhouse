@@ -443,9 +443,12 @@ ClickHouse = [
         let
             json = Json.Document(dataSourcePath),
             server = json[server],
-            port = json[port]
+            port = json[port],
+            database = try json[database] otherwise null,
+            options = try json[options] otherwise null
+
         in
-            {"ClickHouse.Database", server, port},
+            {"ClickHouse.Database", server, port, database, options},
     // Set supported types of authentication
     Authentication = [
         //Windows = [],
