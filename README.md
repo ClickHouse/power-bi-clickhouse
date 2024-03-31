@@ -17,7 +17,7 @@ This connector allows you to retrieve data from ClickHouse directly into Power B
 ## Installation
 
 1. Download and install the [ClickHouse ODBC driver](https://github.com/ClickHouse/clickhouse-odbc).
-1. Create the following directory for the custom connector "Documents\Power BI Desktop\Custom Connectors directory".
+1. Create the following directory for the custom connector "Documents\Power BI Desktop\Custom Connectors" directory.
 1. Download the latest release of the Power BI Connector for ClickHouse from the [Releases](https://github.com/ClickHouse/power-bi-clickhouse/releases) section and place it in the directory you just created.
 1. Enable unsigned connectors loading in File &rarr; Options and settings &rarr; Options &rarr; Security &rarr; Data Extensions &rarr; Allow any extension to load without warning or validation.
 1. Click on "Get Data" and search for "ClickHouseODBCConnector."
