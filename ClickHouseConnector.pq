@@ -97,7 +97,7 @@ Config_DefaultUsernamePasswordHandling = true;
 //
 // Set to null to determine the value from the driver.
 //
-Config_UseParameterBindings = null;
+Config_UseParameterBindings = true;
 // true, false, null
 // Override this setting to force the character escape value.
 // This is typically done when you have set UseParameterBindings to false.
@@ -189,44 +189,9 @@ let
                    each _ = null or _ <> null
                 },
                 {
-                    "PrivateKeyFile",
-                    type nullable text,
-                    "Path to private key file (used by TLS/SSL connections)",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    "CertificateFile",
-                    type nullable text,
-                    "Path to certificate file (used by TLS/SSL connections, ignored in Windows), if the private key and the certificate are stored in the same file, this can be empty if PrivateKeyFile is specified",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    "CALocation",
-                    type nullable text,
-                    "Path to the file or directory containing the CA/root certificates (used by TLS/SSL connections, ignored in Windows)",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
                     "HugeIntAsString",
                     type nullable text,
                     "Report integer column types that may underflow or overflow 64-bit signed integer (SQL_BIGINT) as a String/SQL_VARCHAR",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    "DriverLog",
-                    type nullable text,
-                    "Enable or disable the extended driver logging",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    "DriverLogFile",
-                    type nullable text,
-                    "Path to the extended driver log file (used when DriverLog is on)",
                     null,
                    each _ = null or _ <> null
                 },
@@ -270,12 +235,8 @@ let
             #"Timeout" = ValidatedOptions[Timeout]?,
             #"VerifyConnectionEarly" = ValidatedOptions[VerifyConnectionEarly]?,
             #"SSLMode" = ValidatedOptions[SSLMode]?,
-            #"PrivateKeyFile" = ValidatedOptions[PrivateKeyFile]?,
-            #"CertificateFile" = ValidatedOptions[CertificateFile]?,
-            #"CALocation" = ValidatedOptions[CALocation]?,
-            #"HugeIntAsString" = ValidatedOptions[HugeIntAsString]?,
-            #"DriverLog" = ValidatedOptions[DriverLog]?,
-            #"DriverLogFile" = ValidatedOptions[DriverLogFile]?
+            #"HugeIntAsString" = ValidatedOptions[HugeIntAsString]?
+
 
         ],
         //
