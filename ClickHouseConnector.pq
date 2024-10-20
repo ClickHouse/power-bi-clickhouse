@@ -1,4 +1,4 @@
-// This connector provides a sample Direct Query enabled connector
+﻿// This connector provides a sample Direct Query enabled connector
 // based on an ODBC driver. It is meant as a template for other
 // ODBC based connectors that require similar functionality.
 //
@@ -453,7 +453,7 @@ ClickHouse.Publish = [
     Beta = false,
     Category = "Database",
     ButtonText = {Extension.LoadString("ButtonTitle"), Extension.LoadString("ButtonHelp")},
-    LearnMoreUrl = "https://clickhouse.com",
+    LearnMoreUrl = "https://clickhouse.com/docs/en/integrations/powerbi",
     SupportsDirectQuery = Config_EnableDirectQuery,
      SourceImage = ClickHouse.Icons,
      SourceTypeImage = ClickHouse.Icons
