@@ -1,4 +1,4 @@
-﻿// This connector provides a sample Direct Query enabled connector
+// This connector provides a sample Direct Query enabled connector
 // based on an ODBC driver. It is meant as a template for other
 // ODBC based connectors that require similar functionality.
 //
@@ -450,7 +450,7 @@ ClickHouse = [
 
 // Data Source UI publishing description
 ClickHouse.Publish = [
-    Beta = true,
+    Beta = false,
     Category = "Database",
     ButtonText = {Extension.LoadString("ButtonTitle"), Extension.LoadString("ButtonHelp")},
     LearnMoreUrl = "https://clickhouse.com",
