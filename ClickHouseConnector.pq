@@ -1,4 +1,4 @@
-// This connector provides a sample Direct Query enabled connector
+﻿// This connector provides a sample Direct Query enabled connector
 // based on an ODBC driver. It is meant as a template for other
 // ODBC based connectors that require similar functionality.
 //
@@ -395,7 +395,7 @@ let
         ConnectionStringNoNulls = Record.SelectFields(
             ConnectionString, Table.SelectRows(Record.ToTable(ConnectionString), each [Value] <> null)[Name]
         ),
-        OdbcDatasource = Odbc.DataSource(
+        OdbcDatasource = try Odbc.DataSource(
             ConnectionStringNoNulls,
             [
                 // A logical (true/false) that sets whether to view the tables grouped by their schema names
@@ -413,7 +413,14 @@ let
                 SQLGetInfo = SQLGetInfo,
                 SQLGetTypeInfo = SQLGetTypeInfo
             ]
-        ),
+        ) 
+        catch (e)=>
+        let
+            errorMessage = e[Message],
+            // check if the error is related to missing driver, if so add a link for installation, else raise the error as is
+            customErrorMessageToAdd = if Text.Contains(errorMessage, "doesn't correspond to an installed ODBC driver") then " Please visit the installation guide: https://github.com/ClickHouse/clickhouse-odbc." else ""
+        in 
+            error Text.Combine({errorMessage, customErrorMessageToAdd}),
         // without this filter, the user will get all databases 
        OdbcDatasourceForSelectedDatabase = Table.SelectRows(OdbcDatasource, each [Name] = database or database = null) 
 
