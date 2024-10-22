@@ -1,4 +1,4 @@
-﻿// This connector provides a sample Direct Query enabled connector
+// This connector provides a sample Direct Query enabled connector
 // based on an ODBC driver. It is meant as a template for other
 // ODBC based connectors that require similar functionality.
 //
@@ -306,7 +306,8 @@ let
                     // The values below are required for the SQL Native Client ODBC driver, but might
                     // not be required for your data source.
                     SQL_SQL92_PREDICATES = ODBC[SQL_SP][All],
-                    SQL_AGGREGATE_FUNCTIONS = ODBC[SQL_AF][All]
+                    SQL_AGGREGATE_FUNCTIONS = ODBC[SQL_AF][All],
+                    SQL_CONVERT_FUNCTIONS = 0x00000002 // Tell PowerBI that ClickHouse uses cast and not convert
                 ]
         ),
         // SQLGetTypeInfo can be specified in two ways:
