@@ -126,8 +126,8 @@ shared ClickHouse.Database = Value.ReplaceType(DatabaseCoreImplementation, Datab
 // Documanting the function
 DatabaseType = type function (
     server as (type text meta [
-        Documentation.FieldCaption = "Server",
-        Documentation.FieldDescription = "Name of ClickHouse Server (name only, without prefixes",
+        Documentation.FieldCaption = "Host",
+        Documentation.FieldDescription = "Name of ClickHouse Host (name only, without prefixes",
         Documentation.SampleValues = {"play.clickhouse.com"}
     ]),
      port as (type number meta [
