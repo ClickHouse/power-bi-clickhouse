@@ -126,8 +126,8 @@ shared ClickHouse.Database = Value.ReplaceType(DatabaseCoreImplementation, Datab
 // Documanting the function
 DatabaseType = type function (
     server as (type text meta [
-        Documentation.FieldCaption = "Server",
-        Documentation.FieldDescription = "Name of ClickHouse Server (name only, without prefixes",
+        Documentation.FieldCaption = "Host",
+        Documentation.FieldDescription = "Name of ClickHouse Host (name only, without prefixes",
         Documentation.SampleValues = {"play.clickhouse.com"}
     ]),
      port as (type number meta [
@@ -361,7 +361,7 @@ let
         ConnectionStringNoNulls = Record.SelectFields(
             ConnectionString, Table.SelectRows(Record.ToTable(ConnectionString), each [Value] <> null)[Name]
         ),
-        OdbcDatasource = Odbc.DataSource(
+        OdbcDatasource = try Odbc.DataSource(
             ConnectionStringNoNulls,
             [
                 // A logical (true/false) that sets whether to view the tables grouped by their schema names
@@ -379,7 +379,14 @@ let
                 SQLGetInfo = SQLGetInfo,
                 SQLGetTypeInfo = SQLGetTypeInfo
             ]
-        ),
+        ) 
+        catch (e)=>
+        let
+            errorMessage = e[Message],
+            // check if the error is related to missing driver, if so add a link for installation, else raise the error as is
+            customErrorMessageToAdd = if Text.Contains(errorMessage, "doesn't correspond to an installed ODBC driver") then " Please visit the installation guide: https://github.com/ClickHouse/clickhouse-odbc." else ""
+        in 
+            error Text.Combine({errorMessage, customErrorMessageToAdd}),
         // without this filter, the user will get all databases 
        OdbcDatasourceForSelectedDatabase = Table.SelectRows(OdbcDatasource, each [Name] = database or database = null)
     in
@@ -419,10 +426,10 @@ ClickHouse = [
 
 // Data Source UI publishing description
 ClickHouse.Publish = [
-    Beta = true,
+    Beta = false,
     Category = "Database",
     ButtonText = {Extension.LoadString("ButtonTitle"), Extension.LoadString("ButtonHelp")},
-    LearnMoreUrl = "https://clickhouse.com",
+    LearnMoreUrl = "https://clickhouse.com/docs/en/integrations/powerbi",
     SupportsDirectQuery = Config_EnableDirectQuery,
      SourceImage = ClickHouse.Icons,
      SourceTypeImage = ClickHouse.Icons
