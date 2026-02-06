@@ -1,4 +1,4 @@
-﻿// This connector provides a sample Direct Query enabled connector
+// This connector provides a sample Direct Query enabled connector
 // based on an ODBC driver. It is meant as a template for other
 // ODBC based connectors that require similar functionality.
 //
@@ -139,11 +139,6 @@ DatabaseType = type function (
         Documentation.FieldCaption = "Database",
         Documentation.FieldDescription = "Name of ClickHouse database",
         Documentation.SampleValues = {"default"}  
-    ]),    
-    optional options as (type text meta [
-        Documentation.FieldCaption = "Options",
-        Documentation.FieldDescription = "Additional connection string options separated by semicolon",
-        Documentation.SampleValues = {"Timeout=600;UseUnicode=true","UseUnicode=true"}
     ]))
     as table meta [
         Documentation.Name = "ClickHouse",
@@ -156,7 +151,7 @@ DatabaseType = type function (
 
 
 
-DatabaseCoreImplementation = (server as text, port as number, optional database as text, optional options as any) =>
+DatabaseCoreImplementation = (server as text, port as number, optional database as text) =>
 let
         // Many data sources accept an optional 'options' record that allows users to change
         // default behaviors about the connection, such as connection timeout. Use this map
@@ -246,11 +241,7 @@ let
             }
         ),
 
-        parsedOptions = if(Type.Is(Value.Type(options), type text))
-                            then ConvertOptionsStringToRecord(options, ValidOptionsMap)
-                        else if (Type.Is(Value.Type(options), type record))
-                        then options
-                        else [],
+        parsedOptions = [],
 
         ValidatedOptions = ValidateOptions(parsedOptions, ValidOptionsMap),
         //
@@ -444,11 +435,10 @@ ClickHouse = [
             json = Json.Document(dataSourcePath),
             server = json[server],
             port = json[port],
-            database = try json[database] otherwise null,
-            options = try json[options] otherwise null
+            database = try json[database] otherwise null
 
         in
-            {"ClickHouse.Database", server, port, database, options},
+            {"ClickHouse.Database", server, port, database},
     // Set supported types of authentication
     Authentication = [
         //Windows = [],
