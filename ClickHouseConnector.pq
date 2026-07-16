@@ -237,6 +237,25 @@ let
                     "By default, the unicode driver is used. Set this option to true for ANSI driver",
                     null,
                    each _ = null or _ <> null
+                },
+                {
+                    // Selects the connector backend: "1.0" = ODBC (default, unchanged behavior),
+                    // "2.0" = ADBC over Arrow Flight SQL. See ClickHouseAdbcDataSource below.
+                    "Implementation",
+                    type nullable text,
+                    "Connector implementation: ""1.0"" for ODBC (default), ""2.0"" for ADBC Arrow Flight SQL",
+                    "1.0",
+                    each _ = null or _ = "1.0" or _ = "2.0"
+                },
+                {
+                    // ADBC path only. true (default) keeps ClickHouse Decimal columns exact in
+                    // SUM/arithmetic (SUM("amount") -> Decimal); false downcasts to Float64 to
+                    // match Power Query's default local-eval semantics (SUM(cast(... AS DOUBLE))).
+                    "HighPrecision",
+                    type nullable logical,
+                    "ADBC only: keep Decimal exact in aggregates/arithmetic (true, default) vs downcast to double (false)",
+                    true,
+                    each _ = null or _ = true or _ = false
                 }
 
 
@@ -424,10 +443,16 @@ let
                 SQLGetTypeInfo = SQLGetTypeInfo
             ]
         ),
-        // without this filter, the user will get all databases 
+        // without this filter, the user will get all databases
        OdbcDatasourceForSelectedDatabase = Table.SelectRows(OdbcDatasource, each [Name] = database or database = null)
     in
-        OdbcDatasourceForSelectedDatabase;
+        // Dual implementation: "2.0" routes to the ADBC / Arrow Flight SQL path, anything else
+        // (incl. the default "1.0") keeps the existing ODBC path. M's lazy evaluation means the
+        // ODBC bindings above are not evaluated when the ADBC branch is taken.
+        if ValidatedOptions[Implementation]? = "2.0" then
+            ClickHouseAdbcConnection(server, port, database, ValidatedOptions[HighPrecision]?)
+        else
+            OdbcDatasourceForSelectedDatabase;
 
 
 
@@ -490,11 +515,12 @@ ClickHouse.Icons = [
 
 ConvertOptionsStringToRecord = (optionsString as text, ValidOptionsMap as table) as record =>
         let
-            // Split the options string into rows
-            optionRows = Text.Split(optionsString, ";"),
+            // Split the options string into rows (drop blanks from trailing/double ';')
+            optionRows = List.Select(Text.Split(optionsString, ";"), each Text.Trim(_) <> ""),
 
-            // Split each row into key-value pairs
-            keyValuePairs = List.Transform(optionRows, each Text.Split(_, "=")),
+            // Split each row into key-value pairs, trimming whitespace so "a=1; b=2" works
+            // (otherwise the key becomes " b" and fails validation).
+            keyValuePairs = List.Transform(optionRows, each List.Transform(Text.Split(_, "="), Text.Trim)),
 
             flattenedList = List.Combine(keyValuePairs),
 
@@ -682,3 +708,183 @@ Diagnostics.LogValue = if (EnableTraceOutput) then Diagnostics[LogValue] else (p
 // OdbcConstants contains numeric constants from the ODBC header files, and a
 // helper function to create bitfield values.
 ODBC = Extension.LoadFunction("OdbcConstants.pqm");
+
+/****************************************
+ * ADBC / Arrow Flight SQL implementation ("2.0")
+ *
+ * ClickHouse does NOT implement CommandGetXdbcTypeInfo, so Power BI's automatic
+ * (Adbc.DataSource) type resolution fails for every column ("Unable to understand the
+ * type for column"). Instead we use Adbc.Connection and derive each table's column types
+ * ourselves from `DESCRIBE TABLE`, mapping ClickHouse type strings to M types. Query
+ * folding is provided by SqlView.Generator + ClickHouseSqlGenerator.pqm.
+ ****************************************/
+
+// Loads a .pqm module that evaluates to a value (kept for the later folding work).
+Extension.LoadExpression = (name as text) =>
+    let
+        binary = Extension.Contents(name), asText = Text.FromBinary(binary)
+    in
+        Expression.Evaluate(asText, #shared);
+
+// Adbc.Connection is provided by the host mashup engine. Resolve defensively so the
+// connector still loads (and the ODBC path keeps working) where it is unavailable.
+Adbc.Connection =
+    try
+        #shared[Adbc.Connection]
+    otherwise
+        (driver, connectionString, properties, options) =>
+            error Error.Record("Expression.Error", "The Adbc.Connection function is not available in this environment");
+
+// SqlView.Generator turns a table reference + its (explicitly derived) type into a foldable
+// Table.View that pushes Power Query operations down into ClickHouse SQL via ClickHouseSqlGenerator.
+SqlView.Generator =
+    try
+        #shared[SqlView.Generator]
+    otherwise
+        (uniqueId, sqlGenerator, getData) =>
+            error Error.Record("Expression.Error", "The SqlView.Generator function is not available in this environment");
+
+// ClickHouse SQL dialect overrides (Sql92 base + ClickHouse), consumed by SqlView.Generator.
+ClickHouseSqlGenerator = Extension.LoadExpression("ClickHouseSqlGenerator.pqm");
+
+// Standard navigation-table wrapper.
+Table.ToNavigationTable = (
+    table as table,
+    keyColumns as list,
+    nameColumn as text,
+    dataColumn as text,
+    itemKindColumn as text,
+    itemNameColumn as text,
+    isLeafColumn as text
+) as table =>
+    let
+        tableType = Value.Type(table),
+        newTableType = Type.AddTableKey(tableType, keyColumns, true) meta [
+            NavigationTable.NameColumn = nameColumn,
+            NavigationTable.DataColumn = dataColumn,
+            NavigationTable.ItemKindColumn = itemKindColumn,
+            Preview.DelayColumn = itemNameColumn,
+            NavigationTable.IsLeafColumn = isLeafColumn
+        ]
+    in
+        Value.ReplaceType(table, newTableType);
+
+// Backtick-quote a ClickHouse identifier.
+ChQuote = (name as text) as text => "`" & Text.Replace(name, "`", "``") & "`";
+
+// Map a ClickHouse type string (as returned by DESCRIBE TABLE) to a Power Query M type,
+// WITH a NativeTypeName facet that matches a SqlTypeName in ClickHouseSqlGenerator's
+// SqlGetTypeInfo. SqlView.Generator uses that facet to map each column to a SQL type for
+// folding/round-tripping; without it folding fails with "Unable to understand the type".
+// Conservative mapping verified against ClickHouse 26.5; unknown/edge types fall back
+// to text/VARCHAR so a table never fails to load. Broadened in the type-fidelity phase.
+MapClickHouseType = (chType as text) as type =>
+    let
+        t0 = Text.Trim(chType),
+        // Strip one LowCardinality(...) wrapper, then detect/strip Nullable(...).
+        t1 = if Text.StartsWith(t0, "LowCardinality(") then Text.Range(t0, 15, Text.Length(t0) - 16) else t0,
+        isNullable = Text.StartsWith(t1, "Nullable("),
+        b = Text.Trim(if isNullable then Text.Range(t1, 9, Text.Length(t1) - 10) else t1),
+        spec =
+            if Text.StartsWith(b, "Decimal") then [m = Decimal.Type, n = "DECIMAL"]
+            else if Text.StartsWith(b, "FixedString") then [m = type text, n = "VARCHAR"]
+            else if Text.StartsWith(b, "DateTime") then [m = type datetime, n = "TIMESTAMP"]
+            else if b = "Date" or b = "Date32" then [m = type date, n = "DATE"]
+            else if b = "Float32" or b = "Float64" then [m = Double.Type, n = "DOUBLE"]
+            else if b = "Bool" then [m = type logical, n = "BOOLEAN"]
+            else if List.Contains({"Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64"}, b) then [m = Int64.Type, n = "BIGINT"]
+            else [m = type text, n = "VARCHAR"],
+        baseType = if isNullable then type nullable (spec[m]) else spec[m]
+    in
+        Type.ReplaceFacets(baseType, [NativeTypeName = spec[n]]);
+
+// Build a FOLDABLE leaf table. Column types come from DESCRIBE TABLE (not the missing server
+// catalog); SqlView.Generator then pushes Power Query operations down into ClickHouse SQL.
+ClickHouseLeafTable = (context as record, db as text, tbl as text) as table =>
+    let
+        described = context[Exec]("DESCRIBE TABLE " & ChQuote(db) & "." & ChQuote(tbl), true),
+        colNames = described[name],
+        colTypes = described[type],
+        fields = Record.FromList(
+            List.Transform(colTypes, each [Type = MapClickHouseType(_), Optional = false]),
+            colNames
+        ),
+        tableType = type table (Type.ForRecord(fields, false)),
+        // Schema = ClickHouse database (no catalog level); generates "db"."tbl" in the FROM clause.
+        tableReference = [Kind = "FromTable", Table = [Catalog = null, Schema = db, Name = tbl]]
+    in
+        context[FoldGen](tableReference, tableType, []);
+
+// Tables within one database -> navigation table.
+ClickHouseTablesNav = (context as record, db as text) as table =>
+    let
+        tables = Table.RenameColumns(context[Exec]("SHOW TABLES FROM " & ChQuote(db), true), {{"name", "Name"}}),
+        withData = Table.AddColumn(tables, "Data", each ClickHouseLeafTable(context, db, [Name]), type table),
+        withItemKind = Table.AddColumn(withData, "ItemKind", each "Table", type text),
+        withItemName = Table.AddColumn(withItemKind, "ItemName", each "Table", type text),
+        withIsLeaf = Table.AddColumn(withItemName, "IsLeaf", each true, type logical)
+    in
+        Table.ToNavigationTable(withIsLeaf, {"Name"}, "Name", "Data", "ItemKind", "ItemName", "IsLeaf");
+
+// Databases -> navigation table (filtered to the requested database when supplied).
+ClickHouseDatabasesNav = (context as record, optional database as nullable text) as table =>
+    let
+        databases = Table.RenameColumns(context[Exec]("SHOW DATABASES", true), {{"name", "Name"}}),
+        filtered = Table.SelectRows(databases, each database = null or [Name] = database),
+        withData = Table.AddColumn(filtered, "Data", each ClickHouseTablesNav(context, [Name]), type table),
+        withItemKind = Table.AddColumn(withData, "ItemKind", each "Database", type text),
+        withItemName = Table.AddColumn(withItemKind, "ItemName", each "Database", type text),
+        withIsLeaf = Table.AddColumn(withItemName, "IsLeaf", each false, type logical)
+    in
+        Table.ToNavigationTable(withIsLeaf, {"Name"}, "Name", "Data", "ItemKind", "ItemName", "IsLeaf");
+
+// ADBC entry point: open the Flight SQL connection, wire up folding, return the navigation table.
+ClickHouseAdbcConnection = (server as text, port as number, optional database as text, optional highPrecision as logical) as table =>
+    let
+        Driver = [
+            Name = "FlightSqlClickHouse",
+            Folder = "FlightSQL",
+            File = "libadbc_driver_flightsql.dll",
+            DriverType = "Unmanaged",
+            EntryPoint = "FlightSqlDriverInit"
+        ],
+        Credential = Extension.CurrentCredential(),
+        ConnectionString = [
+            // TLS (grpc+tls) is not supported yet; plaintext grpc only.
+            uri = "grpc://" & server & ":" & Text.From(port),
+            // Basic auth via the driver's username/password (AuthenticateBasicToken handshake).
+            username = Credential[Username],
+            password = Credential[Password],
+            // ClickHouse hands back a bearer token / session on the AuthenticateBasicToken
+            // handshake. With pooled connections (ConnectionPoolType=2), the first query
+            // authenticates but later ones reuse the connection and fail the re-auth RPC
+            // ("Unexpected error in RPC handling (Unknown; AuthenticateBasicToken)") unless the
+            // session cookie is echoed back. Cookie middleware (off by default in the driver)
+            // keeps the pooled connection authenticated across calls.
+            #"adbc.flight.sql.rpc.with_cookie_middleware" = "true"
+        ],
+        Connection = Adbc.Connection(Driver, ConnectionString, [], [ConnectionPoolType = 2]),
+        Exec = (sql as text, isMeta as logical) as table => Connection[ExecuteQuery](sql, null, [IsMetadata = isMeta]),
+        // SqlView.Generator calls GetData with a folded SQL query + the computed result type;
+        // we execute the SQL and align column names to the declared result type.
+        GetData = (query as text, resultType as type, ctx) as table =>
+            Table.View(null, [
+                GetType = () => resultType,
+                GetRows = () =>
+                    let
+                        data = Exec(query, false),
+                        want = Table.ColumnNames(#table(resultType, {})),
+                        have = Table.ColumnNames(data),
+                        aligned =
+                            if List.Count(have) = List.Count(want) and have <> want then
+                                Table.RenameColumns(data, List.Zip({have, want}))
+                            else
+                                data
+                    in
+                        aligned
+            ]),
+        UniqueId = "clickhouse:" & server & ":" & Text.From(port) & ":" & (if database = null then "" else database),
+        FoldGen = SqlView.Generator(UniqueId, ClickHouseSqlGenerator(highPrecision), GetData),
+        context = [Exec = Exec, FoldGen = FoldGen]
+    in
+        ClickHouseDatabasesNav(context, database);

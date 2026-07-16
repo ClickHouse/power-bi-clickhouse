@@ -1,0 +1,448 @@
+// ClickHouseSqlGenerator.pqm — ClickHouse SQL dialect overrides for the ADBC / Arrow Flight
+// SQL path, layered on Microsoft's stock Sql92 generator via SqlGeneratorCommon[MergeOverrides].
+//
+// The base Sql92 generator folds projection / filter / group-by / order-by / LIMIT on its
+// own. Everything else needs explicit FunctionOverrides (otherwise Power Query fails with
+// "We couldn't fold the expression to the data source"): aggregates (SUM/AVG/MIN/MAX/COUNT/
+// uniq/uniqExact), arithmetic, date/time and text functions (emitted as ClickHouse-native
+// SQL), and the conversion wrappers the DAX DirectQuery layer relies on (Value.As,
+// Double.From, ...). All emitted SQL is verified to execute on ClickHouse 26.5.
+//
+// Returns the SQL generator. `highPrecision` (default true) controls whether ClickHouse Decimal
+// columns are kept exact in SUM/arithmetic (true → SUM("amount") stays Decimal) or downcast to
+// Float64 to match Power Query's default local-eval semantics (false → SUM(cast(... AS DOUBLE))).
+// Wired to the connector's HighPrecision option.
+(optional highPrecision as logical) =>
+let
+    PreserveDecimal = highPrecision <> false,
+    GetNumberLiteral = (value as number) => Number.ToText(value),
+    TypeInfo = Extension.LoadExpression("TypeInfo.pqm"),
+    AddUnsignedAttribute = Table.AddColumn(TypeInfo, "UnsignedAttribute", each if [Unsigned] = true then 1 else 0),
+    SelectTypeInfoColumns = Table.SelectColumns(
+        AddUnsignedAttribute,
+        {"Name", "Type", "ColumnSize", "GetLiteral", "Searchable", "UnsignedAttribute", "NumberPrecisionRadix"}
+    ),
+    SqlGetTypeInfoBase = Table.RenameColumns(
+        SelectTypeInfoColumns,
+        {{"Name", "SqlTypeName"}, {"NumberPrecisionRadix", "NumericPrecisionRadix"}}
+    ),
+    // Register the parameterized decimal we use as an emitted-cast target (see
+    // decimalCastTypeWithFacets). The engine validates cast target types against this catalog —
+    // without this row folding fails with "The type Decimal(38, 10) is not supported". Kept as a
+    // distinct catalog entry (not a rename of DECIMAL) so column typing still uses plain DECIMAL.
+    SqlGetTypeInfo = Table.Combine({
+        SqlGetTypeInfoBase,
+        Table.FromRecords({[
+            SqlTypeName = "Decimal(38, 10)",
+            Type = Decimal.Type,
+            ColumnSize = 38,
+            GetLiteral = GetNumberLiteral,
+            Searchable = 2,
+            UnsignedAttribute = 0,
+            NumericPrecisionRadix = 10
+        ]})
+    }),
+
+    // Conversions the generator may emit without wrapping in CAST. ClickHouse is permissive
+    // about numeric/string coercion; widen further later to cut redundant casts.
+    SupportedConversions = #table(
+        {"FromSqlTypeName", "ToSqlTypeNames"},
+        {
+            {"BOOLEAN", {"VARCHAR", "DECIMAL", "BIGINT", "INTEGER", "SMALLINT", "TINYINT", "REAL", "DOUBLE"}},
+            {"TINYINT", {"TINYINT", "SMALLINT", "INTEGER", "BIGINT", "REAL", "DOUBLE", "DECIMAL", "VARCHAR"}},
+            {"SMALLINT", {"SMALLINT", "INTEGER", "BIGINT", "TINYINT", "REAL", "DOUBLE", "DECIMAL", "VARCHAR"}},
+            {"INTEGER", {"INTEGER", "BIGINT", "SMALLINT", "TINYINT", "REAL", "DOUBLE", "DECIMAL", "VARCHAR"}},
+            {"BIGINT", {"BIGINT", "INTEGER", "SMALLINT", "TINYINT", "REAL", "DOUBLE", "DECIMAL", "VARCHAR"}},
+            {"REAL", {"REAL", "INTEGER", "BIGINT", "SMALLINT", "DOUBLE", "DECIMAL", "VARCHAR"}},
+            {"DOUBLE", {"DOUBLE", "REAL", "INTEGER", "BIGINT", "SMALLINT", "DECIMAL", "VARCHAR"}},
+            {"DECIMAL", {"DECIMAL", "Decimal(38, 10)", "DOUBLE", "REAL", "BIGINT", "INTEGER", "VARCHAR"}},
+            {"Decimal(38, 10)", {"Decimal(38, 10)", "DECIMAL", "DOUBLE", "REAL", "BIGINT", "INTEGER", "VARCHAR"}},
+            {"DATE", {"DATE", "TIMESTAMP", "VARCHAR"}},
+            {"TIME", {"TIME", "VARCHAR"}},
+            {"TIMESTAMP", {"TIMESTAMP", "DATE", "TIME", "VARCHAR"}},
+            {"VARCHAR", {"VARCHAR", "DECIMAL", "BIGINT", "INTEGER", "SMALLINT", "TINYINT", "REAL", "DOUBLE", "DATE", "TIME", "TIMESTAMP"}}
+        }
+    ),
+
+    SqlTypesCategories = [
+        SoftBase2Types = {"DOUBLE", "REAL", "DECIMAL", "Decimal(38, 10)", "BIGINT", "INTEGER", "SMALLINT", "TINYINT"},
+        SoftBase10Types = {"DECIMAL", "Decimal(38, 10)", "DOUBLE", "REAL", "BIGINT", "INTEGER", "SMALLINT", "TINYINT"},
+        VarBinaryTypes = {"BINARY"},
+        WideCharTypes = {"VARCHAR"},
+        VarCharTypes = {"VARCHAR"},
+        WideVarCharTypes = {"VARCHAR"}
+    ],
+
+    DefaultTypes = #table(
+        {"Type", "SqlTypeName"},
+        {
+            {Logical.Type, "BOOLEAN"},
+            {Int8.Type, "TINYINT"},
+            {Int16.Type, "SMALLINT"},
+            {Int32.Type, "INTEGER"},
+            {Int64.Type, "BIGINT"},
+            {Single.Type, "REAL"},
+            {Double.Type, "DOUBLE"},
+            {Decimal.Type, "DECIMAL"},
+            {Date.Type, "DATE"},
+            {Time.Type, "TIME"},
+            {DateTime.Type, "TIMESTAMP"},
+            {Text.Type, "VARCHAR"},
+            {Binary.Type, "BINARY"}
+        }
+    ),
+
+    // --- Extension/helper plumbing (mirrors Spice SqlGenerator.pqm) ---------------------------
+    Extension.LoadExpression = (name as text) =>
+        let
+            binary = Extension.Contents(name), asText = Text.FromBinary(binary)
+        in
+            Expression.Evaluate(asText, #shared),
+    SqlGeneratorHelpers = Extension.LoadExpression("SqlGeneratorCommon.pqm"),
+    AdbcHelpers = SqlGeneratorHelpers[Helpers],
+    AdbcConstants = SqlGeneratorHelpers[Constants],
+    funcName = SqlGeneratorHelpers[FunctionNames],
+    one = AdbcConstants[one],
+
+    Argument = AdbcHelpers[Argument],
+    Invocation = AdbcHelpers[Invocation],
+    InvocationWithType = AdbcHelpers[InvocationWithType],
+    BinaryOperation = AdbcHelpers[BinaryOperation],
+    BinaryLogicalOperation = AdbcHelpers[BinaryLogicalOperation],
+    Literal = AdbcHelpers[Literal],
+    CastSqlExpression = AdbcHelpers[CastSqlExpression],
+
+    // Native M types carrying the ClickHouse SqlTypeName facet (so emitted CASTs target a type
+    // the generator knows about, matching SqlGetTypeInfo / SupportedConversions above).
+    textTypeWithFacets = Type.ReplaceFacets(Text.Type, [NativeTypeName = "VARCHAR"]),
+    doubleTypeWithFacets = Type.ReplaceFacets(Double.Type, [NativeTypeName = "DOUBLE"]),
+    decimalTypeWithFacets = Type.ReplaceFacets(Decimal.Type, [NativeTypeName = "DECIMAL"]),
+    // For EMITTED casts only (never for column typing): bare `DECIMAL` in ClickHouse means
+    // Decimal(10, 0) — scale ZERO — so `cast(1/1.3 as DECIMAL)` silently returns 0. Casting
+    // to an explicit Decimal(38, 10) preserves the fraction.
+    decimalCastTypeWithFacets = Type.ReplaceFacets(Decimal.Type, [NativeTypeName = "Decimal(38, 10)"]),
+    integerTypeWithFacets = Type.ReplaceFacets(Number.Type, [NativeTypeName = "INTEGER"]),
+    dateTypeWithFacets = Type.ReplaceFacets(Date.Type, [NativeTypeName = "DATE"]),
+    datetimeTypeWithFacets = Type.ReplaceFacets(DateTime.Type, [NativeTypeName = "TIMESTAMP"]),
+
+    GetListCount = (listvalue) => if listvalue = null then 0 else List.Count(listvalue),
+    GetListContains = (listvalue, value) => List.Contains(listvalue, value),
+
+    // Safe AST matcher: returns an Invocation's Arguments if `node` is an Invocation of M
+    // function `fn` with `n` args, else null (never throws). Used to recognize the
+    // distinct-count shapes Power BI emits and fold them to ClickHouse uniqExact/uniq.
+    MatchInvocation = (node, fn, n) =>
+        if node = null then null
+        else if (try node[Kind] otherwise null) <> "Invocation" then null
+        else if (try node[Function][Kind] otherwise null) <> "Constant" then null
+        else if not ((try node[Function][Value] otherwise null) = fn) then null
+        else if GetListCount(node[Arguments]) <> n then null
+        else node[Arguments],
+    // For Table.Distinct(Table.SelectColumns(_, {cols})) return the list of column-arg ASTs, else null.
+    DistinctCols = (visitor, tableArg) =>
+        let
+            td = MatchInvocation(tableArg, Table.Distinct, 1),
+            sc = if td <> null then MatchInvocation(td{0}, Table.SelectColumns, 2) else null,
+            cols = if sc <> null and (try sc{1}[Value] otherwise null) is list then sc{1}[Value] else null
+        in
+            if cols <> null then List.Transform(cols, each Argument(visitor(RowExpression.Column(_)), null)) else null,
+
+    // Coerce an aggregate/arithmetic argument to the precision Power Query asked for.
+    //
+    // HighPrecision (PreserveDecimal, default ON): pass operands through UNTOUCHED and let
+    // ClickHouse's native arithmetic semantics apply — no cast("col" as DOUBLE) wrapping.
+    // This is safe on ClickHouse specifically: `/` is always floating-point (1/2 = 0.5 — no
+    // integer-division trap) and Decimal arithmetic stays Decimal. The one cast kept is an
+    // explicitly REQUESTED Precision.Decimal on a floating operand — emitted as parameterized
+    // Decimal(38, 10), never bare DECIMAL (= Decimal(10,0), which silently truncates).
+    // Note: we cannot rely on operand facets here — the engine strips NativeTypeName from
+    // arithmetic operands (aggregate args keep them, which is why SUM("amount") folds uncast).
+    //
+    // HighPrecision = false: legacy M-faithful behavior — coerce operands to DOUBLE to match
+    // Power Query's local double-arithmetic semantics exactly.
+    ValueFunctionsArgumentsVisitor = (value, precision) =>
+        let
+            floatingPoint = {"DOUBLE", "FLOAT", "REAL"},
+            nativeType = try Type.Facets(value[Type])[NativeTypeName] otherwise null
+        in
+            if Type.Is(value[Type], type number) or Type.Is(value[Type], type nullable number)
+            then
+                if PreserveDecimal
+                then
+                    if (List.Contains(floatingPoint, nativeType) and precision = Precision.Decimal)
+                    then CastSqlExpression(value, decimalCastTypeWithFacets)
+                    else value
+                else
+                    if (List.Contains(floatingPoint, nativeType))
+                    then
+                        if (precision = Precision.Double) then value
+                        else CastSqlExpression(value, decimalCastTypeWithFacets)
+                    else if (precision = Precision.Decimal) then value
+                    else CastSqlExpression(value, doubleTypeWithFacets)
+            else ...,
+
+    ValueFunctions = (visitor, ast, operation) =>
+        if GetListCount(ast[Arguments]) = 2 or GetListCount(ast[Arguments]) = 3
+        then
+            let
+                value1 = visitor(ast[Arguments]{0}),
+                value2 = visitor(ast[Arguments]{1}),
+                // Defensive: the 3rd (precision) arg is normally a Constant; if the host passes
+                // anything else, [Value] would THROW inside the override and kill the fold.
+                value3 = if GetListCount(ast[Arguments]) = 3 then (try ast[Arguments]{2}[Value] otherwise Precision.Double) else Precision.Double,
+                firstArg = ValueFunctionsArgumentsVisitor(value1, value3),
+                secondArg = ValueFunctionsArgumentsVisitor(value2, value3)
+            in
+                BinaryOperation(firstArg, operation, secondArg)
+        else ...,
+
+    // Double.From / Number.From on an already-numeric argument. See the override comment below.
+    NumericFromHelper = (visitor, ast) =>
+        if GetListCount(ast[Arguments]) = 1
+        then
+            let
+                arg = visitor(ast[Arguments]{0})
+            in
+                if Type.Is(arg[Type], type number) or Type.Is(arg[Type], type nullable number)
+                then (if PreserveDecimal then arg else CastSqlExpression(arg, doubleTypeWithFacets))
+                else ...
+        else ...,
+
+    // Value.As / Value.ReplaceType fold as a passthrough when the asserted type is `any` or the
+    // expression already satisfies it. DAX-generated DirectQuery queries wrap expressions in
+    // these type assertions constantly (plain Power Query steps rarely do) — without this
+    // override, every DAX measure fails with "We couldn't fold the expression". Ported from the
+    // Snowflake/Spice reference connectors (identical in both).
+    ValueAsAndReplaceType = (visitor, ast) =>
+        if GetListCount(ast[Arguments]) = 2 then
+            let
+                arg1 = visitor(ast[Arguments]{0}),
+                arg2 = ast[Arguments]{1}[Value]
+            in
+                if (Type.Is(arg2, type any)) or (Type.Is(arg1[Type], arg2) and Type.IsNullable(arg2))
+                then arg1
+                else ...
+        else ...,
+
+    MinMaxHelper = (foldedArg, functionName) =>
+        if Type.Is(foldedArg[Type], type nullable number) or
+            Type.Is(foldedArg[Type], type nullable date) or
+            Type.Is(foldedArg[Type], type nullable datetime) or
+            Type.Is(foldedArg[Type], type nullable text)
+        then Invocation({Argument(foldedArg, null)}, functionName)
+        else ...,
+
+    // CH-native date helpers. Return types match M semantics, verified against CH 26.5:
+    // toStartOfYear/Quarter/Month(Date)->Date; toStartOfDay(DateTime)->DateTime;
+    // add*(Date)->Date / add*(DateTime)->DateTime; toYear/toMonth/toDayOfMonth->integer.
+    StartOfDateHelper = (visitor, ast, chFunc) =>
+        let arg = visitor(ast[Arguments]{0}) in
+            if Type.Is(arg[Type], type nullable date)
+            then InvocationWithType({Argument(arg, null)}, chFunc, dateTypeWithFacets)
+            else ...,
+    DateAddHelper = (visitor, ast, chFunc) =>
+        let
+            arg = visitor(ast[Arguments]{0}),
+            n = visitor(ast[Arguments]{1}),
+            rt = if Type.Is(arg[Type], type nullable datetime) then datetimeTypeWithFacets
+                 else if Type.Is(arg[Type], type nullable date) then dateTypeWithFacets
+                 else null
+        in
+            if rt <> null then InvocationWithType({Argument(arg, null), Argument(n, null)}, chFunc, rt)
+            else ...,
+    DatePartHelper = (visitor, ast, chFunc) =>
+        InvocationWithType({Argument(visitor(ast[Arguments]{0}), null)}, chFunc, integerTypeWithFacets),
+
+    // --- Aggregate + arithmetic FunctionOverrides (CH-safe ANSI SQL) -------------------------
+    FunctionOverrides = [
+        List.Sum = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 1 or GetListCount(ast[Arguments]) = 2
+            then
+                let
+                    value1 = visitor(ast[Arguments]{0}),
+                    value2 = if GetListCount(ast[Arguments]) = 2 then (try ast[Arguments]{1}[Value] otherwise Precision.Double) else Precision.Double,
+                    firstArg = ValueFunctionsArgumentsVisitor(value1, value2)
+                in
+                    InvocationWithType({Argument(firstArg, null)}, "SUM", firstArg[Type])
+            else ...,
+
+        List.Average = (visitor, rowType, groupKeys, ast) =>
+            let
+                foldedArg = visitor(ast[Arguments]{0})
+            in
+                if GetListCount(ast[Arguments]) = 1 and groupKeys <> null and Type.Is(foldedArg[Type], type number)
+                then Invocation({Argument(foldedArg, null)}, "AVG")
+                else ...,
+
+        List.Max = (visitor, rowType, groupKeys, ast) =>
+            let
+                foldedArg = visitor(ast[Arguments]{0})
+            in
+                if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
+                then MinMaxHelper(foldedArg, "MAX")
+                else ...,
+
+        List.Min = (visitor, rowType, groupKeys, ast) =>
+            let
+                foldedArg = visitor(ast[Arguments]{0})
+            in
+                if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
+                then MinMaxHelper(foldedArg, "MIN")
+                else ...,
+
+        // COUNT("col"), or uniqExact("col") when the arg is List.Distinct(col) (exact distinct count).
+        List.Count = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
+            then
+                let ld = MatchInvocation(ast[Arguments]{0}, List.Distinct, 1) in
+                    if ld <> null
+                    then InvocationWithType({Argument(visitor(ld{0}), null)}, "uniqExact", integerTypeWithFacets)
+                    else InvocationWithType({Argument(visitor(ast[Arguments]{0}), null)}, "COUNT", integerTypeWithFacets)
+            else ...,
+
+        // Row count: arg is the group's sub-table, not a column. uniqExact(cols) when it's
+        // Table.Distinct(Table.SelectColumns(...)) (exact distinct count, same pattern Snowflake
+        // folds to approx_count_distinct); otherwise COUNT(1).
+        Table.RowCount = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
+            then
+                let cols = DistinctCols(visitor, ast[Arguments]{0}) in
+                    if cols <> null then InvocationWithType(cols, "uniqExact", integerTypeWithFacets)
+                    else InvocationWithType({Argument(one, null)}, "COUNT", integerTypeWithFacets)
+            else ...,
+
+        // Power BI's approximate distinct count (Snowflake folds this to approx_count_distinct);
+        // ClickHouse's native approximate-distinct is uniq(...).
+        Table.ApproximateRowCount = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
+            then
+                let cols = DistinctCols(visitor, ast[Arguments]{0}) in
+                    if cols <> null then InvocationWithType(cols, "uniq", integerTypeWithFacets)
+                    else ...
+            else ...,
+
+        Value.Multiply = (visitor, rowType, groupKeys, ast) => ValueFunctions(visitor, ast, "Multiply"),
+        Value.Add = (visitor, rowType, groupKeys, ast) => ValueFunctions(visitor, ast, "Add"),
+        Value.Divide = (visitor, rowType, groupKeys, ast) => ValueFunctions(visitor, ast, "Divide"),
+        Value.Subtract = (visitor, rowType, groupKeys, ast) => ValueFunctions(visitor, ast, "Subtract"),
+
+        Value.As = (visitor, rowType, groupKeys, ast) => ValueAsAndReplaceType(visitor, ast),
+        Value.ReplaceType = (visitor, rowType, groupKeys, ast) => ValueAsAndReplaceType(visitor, ast),
+
+        // The DAX DirectQuery layer wraps row-level arithmetic operands in Double.From(...)
+        // (DAX math is double-based). Without this override every DAX measure doing row-level
+        // arithmetic (e.g. SUMX(t, [a]/[b])) fails to fold — trace: "The function Double.From
+        // is not valid." For numeric args: under HighPrecision pass through (ClickHouse native
+        // arithmetic; Decimal/Decimal stays exact), otherwise cast to DOUBLE for M-faithful
+        // double semantics. Number.From gets the same treatment (same conversion family).
+        Double.From = (visitor, rowType, groupKeys, ast) => NumericFromHelper(visitor, ast),
+        Number.From = (visitor, rowType, groupKeys, ast) => NumericFromHelper(visitor, ast),
+
+        Value.Compare = (visitor, rowType, groupKeys, ast) =>
+            let
+                arg1minusarg2 = ValueFunctions(visitor, ast, "Subtract"),
+                addSign = InvocationWithType({Argument(arg1minusarg2, doubleTypeWithFacets)}, funcName[SIGN], integerTypeWithFacets)
+            in
+                addSign,
+
+        // --- Date/time (CH-native; each emitted SQL verified to execute on CH 26.5) ---
+        Date.Year = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 1 then DatePartHelper(visitor, ast, "toYear") else ...,
+        Date.Month = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 1 then DatePartHelper(visitor, ast, "toMonth") else ...,
+        Date.Day = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 1 then DatePartHelper(visitor, ast, "toDayOfMonth") else ...,
+
+        Date.StartOfYear = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 1 then StartOfDateHelper(visitor, ast, "toStartOfYear") else ...,
+        Date.StartOfQuarter = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 1 then StartOfDateHelper(visitor, ast, "toStartOfQuarter") else ...,
+        Date.StartOfMonth = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 1 then StartOfDateHelper(visitor, ast, "toStartOfMonth") else ...,
+        Date.StartOfDay = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 1 then
+                let arg = visitor(ast[Arguments]{0}) in
+                    if Type.Is(arg[Type], type nullable datetime) then InvocationWithType({Argument(arg, null)}, "toStartOfDay", datetimeTypeWithFacets)
+                    else if Type.Is(arg[Type], type nullable date) then arg
+                    else ...
+            else ...,
+
+        Date.AddDays = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 2 then DateAddHelper(visitor, ast, "addDays") else ...,
+        Date.AddWeeks = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 2 then DateAddHelper(visitor, ast, "addWeeks") else ...,
+        Date.AddMonths = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 2 then DateAddHelper(visitor, ast, "addMonths") else ...,
+        Date.AddQuarters = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 2 then DateAddHelper(visitor, ast, "addQuarters") else ...,
+        Date.AddYears = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 2 then DateAddHelper(visitor, ast, "addYears") else ...,
+
+        // --- Text (CH-native) -----------------------------------------------------------------
+        // Text.Start/End/Length/Replace/Lower/Upper/Trim*/Repeat already fold via the Sql92 base
+        // to names ClickHouse accepts (LEFT/RIGHT/Length/REPLACE/...). The overrides below cover
+        // the rest, e.g. Text.Start(s, Text.PositionOf(s, "-")) -> LEFT(s, position(s, '-') - 1).
+
+        // M Text.PositionOf is 0-based and returns -1 when absent; CH position() is 1-based and
+        // returns 0 when absent — so position(s, sub) - 1 matches M exactly (incl. not-found).
+        Text.PositionOf = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 2
+            then
+                let
+                    str = Argument(visitor(ast[Arguments]{0}), textTypeWithFacets),
+                    needle = Argument(visitor(ast[Arguments]{1}), textTypeWithFacets),
+                    pos = InvocationWithType({str, needle}, "position", integerTypeWithFacets)
+                in
+                    BinaryOperation(pos, "Subtract", Literal("1"))
+            else ...,
+
+        // Base Sql92 folds Text.Contains/StartsWith/EndsWith to CONTAINS/StartsWith/EndsWith,
+        // none of which exist in ClickHouse (would emit invalid SQL). CH-native replacements:
+        Text.Contains = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 2
+            then
+                let
+                    str = Argument(visitor(ast[Arguments]{0}), textTypeWithFacets),
+                    needle = Argument(visitor(ast[Arguments]{1}), textTypeWithFacets),
+                    pos = InvocationWithType({str, needle}, "position", integerTypeWithFacets)
+                in
+                    BinaryLogicalOperation("GreaterThan", pos, Literal("0"))
+            else ...,
+
+        Text.StartsWith = [Name = "startsWith", Type = Logical.Type],
+        Text.EndsWith = [Name = "endsWith", Type = Logical.Type],
+
+        // Currently unreachable: the Power Query engine does not route Text.BeforeDelimiter to
+        // SQL generators (verified — Text.PositionOf above folds via the same mechanism while
+        // this override is never invoked; the same limitation exists on ODBC and on Microsoft's
+        // first-party PostgreSQL connector). Kept so it starts folding to
+        // substringIndex(s, delim, 1) automatically if the engine ever adds routing.
+        // Foldable equivalent users can write today: Text.Start(s, Text.PositionOf(s, delim)).
+        Text.BeforeDelimiter = (visitor, rowType, groupKeys, ast) =>
+            if GetListCount(ast[Arguments]) = 2
+            then
+                let
+                    str = Argument(visitor(ast[Arguments]{0}), textTypeWithFacets),
+                    delim = Argument(visitor(ast[Arguments]{1}), textTypeWithFacets),
+                    cnt = Argument(Literal("1"), integerTypeWithFacets)
+                in
+                    InvocationWithType({str, delim, cnt}, "substringIndex", textTypeWithFacets)
+            else ...
+    ],
+
+    Override = [
+        SqlGetTypeInfo = SqlGetTypeInfo,
+        SqlCapabilities = [
+            LimitClauseKind = LimitClauseKind.LimitOffset
+        ],
+        FunctionOverrides = FunctionOverrides,
+        BinaryOperatorOverrides = [],
+        UnaryOperatorOverrides = [],
+        DefaultTypes = DefaultTypes,
+        SupportedConversions = SupportedConversions,
+        SqlTypesCategories = SqlTypesCategories
+    ],
+
+    SqlGenerator = SqlGeneratorHelpers[MergeOverrides]("Sql92", Override, false)
+in
+    SqlGenerator
