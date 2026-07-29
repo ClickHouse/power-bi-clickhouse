@@ -777,7 +777,7 @@ ChQuote = (name as text) as text => "`" & Text.Replace(name, "`", "``") & "`";
 // SqlGetTypeInfo. SqlView.Generator uses that facet to map each column to a SQL type for
 // folding/round-tripping; without it folding fails with "Unable to understand the type".
 // Conservative mapping verified against ClickHouse 26.5; unknown/edge types fall back
-// to text/VARCHAR so a table never fails to load. Broadened in the type-fidelity phase.
+// to text/VARCHAR so a table never fails to load.
 MapClickHouseType = (chType as text) as type =>
     let
         t0 = Text.Trim(chType),
