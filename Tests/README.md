@@ -1,0 +1,120 @@
+# Connector test suites (PQTest)
+
+Automated tests for the ClickHouse Power BI connector, following the structure Microsoft uses
+for its certified connectors: each test is a `.query.pq` (an M expression executed against a
+live ClickHouse) paired with a `.query.pqout` (expected-result snapshot). Tests are run with
+**PQTest** from the Power Query SDK — on Windows, either from the VS Code Test Explorer
+(Power Query SDK extension) or the `pqtest.exe` CLI.
+
+## Layout
+
+```
+Tests/
+  Fixtures/seed.sql        deterministic fixture tables (database `pqtest`)
+  ParameterQueries/        connection bootstraps (one per implementation)
+  Settings/                one .testsettings.json per suite = what Test Explorer discovers
+  TestSuites/
+    Sanity/                connect, navigation, load, column types
+    Folding/               filter / group-by / sort / distinct fold correctly
+    KnownIssues/           regression guards for bugs fixed during development
+    Functions/             function coverage (aggregates, dates, text)
+    Comparison/            ODBC vs ADBC same-results checks
+```
+
+## Setup
+
+1. **Seed the server:** run `Fixtures/seed.sql` against your ClickHouse
+   (`clickhouse-client < seed.sql`). All data is deterministic — snapshots are stable.
+2. **Point the bootstraps at your server:** edit `Server`/`Port` at the top of
+   `ParameterQueries/*.parameterquery.pq` (ADBC = Arrow Flight port; ODBC = HTTP port)
+   and in `TestSuites/Comparison/AdbcOdbcSameResults.query.pq`.
+3. **Build the connector** (`ClickHouse.mez`) and configure the SDK extension's extension path.
+4. **Set credentials** once via the SDK's *Power Query: Set Credential* command
+   (Basic auth for the ClickHouse data source).
+
+## Machine setup for the runner script
+
+`run-tests.sh` drives PQTest on a Windows machine over SSH. Copy
+`run-tests.env.example` to `run-tests.env` (not committed) and fill in your SSH
+destination, the Windows paths, and the ClickHouse host address as seen from Windows.
+
+## Running
+
+- **VS Code:** open this connector folder, then Test Explorer lists one node per file in
+  `Settings/`. Run a suite; PQTest executes every `.query.pq` in the suite's folder.
+- **First run:** `FailOnMissingOutputFile` is `false`, so missing `.pqout` snapshots are
+  generated. Review them against the expected values below, commit them, then flip the flag
+  to `true` to make the suites strict.
+
+## Expected values (for reviewing generated snapshots)
+
+| Test | Field | Expected |
+|---|---|---|
+| Sanity/LoadTable | rows per table | numbers 5, dates 3, text 4, division 3, big_ids 4, events 100 |
+| Folding/FilterEquals | Rows / Rid | 1 / 4 |
+| Folding/FilterRangeGroupBy | Groups / FirstName / FirstTotal / FirstCnt | 10 / name_0 / 43.75 / 5 |
+| Folding/SortFirstN | Ids | 99,98,97 |
+| Folding/DistinctCount | DistinctNames / AllRows | 10 / 100 |
+| KnownIssues/DecimalDivision | Row1RatioRounded / Row2Ratio / Row3Ratio | 0.769 / 4 / 0 |
+| KnownIssues/BigIntEquality | Rows / Label | 1 / two_pow_53_plus_1 |
+| KnownIssues/NestedAggregation | Total | 618.75 |
+| Functions/Aggregates | SumI32 / AvgF64 / SumDec / CountAll | 100000 / 0.7 / -11302.25 / 5 |
+| Functions/TextFunctions | Upper / Len / Pos / Starts | HELLO WORLD / 11 / 6 / true |
+| Comparison/AdbcOdbcSameResults | all fields | true |
+| Folding/MultiValueFilter | Buckets / First / GrandTotal | 4 / high / 93.12 |
+| Folding/MinMaxDatesText | MinDate / MaxDate / MaxText | 2020-01-01 / 2026-12-31 / a-b-c |
+| Folding/AverageTypes | AvgEventsId / AvgDecimal | 49.5 / -2260.45 |
+| Folding/Arithmetic | Plus / Minus / Times | 101000 / 99000 / 7 |
+| Folding/GroupDistinctCount | Groups / FirstDays / TotalDays | 10 / 3 / 30 |
+| Folding/ApproxDistinct | Groups / FirstDays | 10 / 3 |
+| Functions/NumericFrom | DF / NF | 100000 / 999.99 |
+| Functions/ValueCompare | Less / Equal / Greater | -1 / 0 / 1 |
+| Functions/DateCoverage | leap-day parts, period starts, add* family | 2024-02-29 row; AddY/AddM clamp to 2025-02-28 |
+| Functions/TextFolding | Upper/Lower/Len/Left/Right/Replace/PositionOf | HELLO WORLD / … / PosFound 6 / PosNotFound -1 |
+| Folding/DistinctCountListShape | Groups / FirstDays | 10 / 3 |
+| Functions/SumPrecisionDecimal | SumDecimalPrecision | 3.5 (folds as SUM(cast(f64 as Decimal(38, 10)))) |
+| Functions/ValueAsFold | VA | 100000 (pure passthrough) |
+| Functions/TextPredicates | ContainsRows / StartsRows / EndsRows | 1 / 1 / 1 |
+| KnownIssues/NullableColumns | SumV / SumN / Rows / BigN | 4 / 60 / 4 / 2 |
+| KnownIssues/PlainDateTime | Rows / DtEpoch / Dt64Text | 2 / 1709209845 / 2024-02-29 12:30:45 |
+
+## What the suites guard
+
+- **KnownIssues/DecimalDivision** — decimal ratios must not collapse to integers
+  (bare `DECIMAL` in ClickHouse is `Decimal(10, 0)`; the generator casts to `Decimal(38, 10)`).
+- **KnownIssues/BigIntEquality** — 64-bit values above 2^53 must round-trip exactly
+  (guards against DOUBLE coercion in folded comparisons).
+- **KnownIssues/NestedAggregation** — aggregation over an aggregated subquery (the shape
+  report visuals generate) must not fail on alias resolution.
+- **Folding/** — results are validated end to end; to additionally inspect the generated SQL,
+  check the ClickHouse query log (`system.query_log`, `interface = 10`) or the server trace log.
+
+## Runner notes (learned the hard way)
+
+- Run `compare` from the `Tests/Settings` directory — relative paths in the settings JSON
+  resolve against the current working directory, not the settings file.
+- Every `.query.pq` must be a `(source) => ...` function when run via a settings file with a
+  parameter query — standalone `let` queries fail with "cannot convert Record to Function".
+- Do NOT set `DiagnosticsFolderPath` in the settings files: with SdkTools 2.146.x it activates
+  a diagnostics path whose service fails to initialize, and every ADBC evaluation then dies
+  with a bare "Object reference not set" error (thrown while constructing the query event).
+  Use PQTest's `-l`/`-trx` flags instead when traces are needed.
+- If a test ever ran while broken (bad server address, missing credential), delete its stale
+  `.pqout` before rerunning — snapshot generation may have captured the old error text, and a
+  later "Passed" against such a snapshot is meaningless. Always eyeball generated snapshots
+  against the expected-values table above.
+- The ClickHouse server must implement/accept `CloseSession`; the ADBC host closes sessions on
+  connection cleanup and the evaluation fails if that call errors.
+
+## Proving folding (not just values)
+
+Passing values do NOT prove a step folded — on small fixtures a silently-unfolded step
+computes the same answer locally. PQTest's `--failOnFoldingFailure` does not detect this
+for record-returning tests. The reliable proof is server-side: after a suite run, check
+`system.query_log` (Flight = `interface 10`) for the expected SQL fragments, e.g.
+`uniqExact("d")`, `uniq("d")`, `"id" in (`, `startsWith`, `endsWith`, `position(`,
+`case when`. All fragments listed here were verified present after the current suites.
+
+Known folding quirk (backlog): integer+integer computed columns fold with engine-injected
+`cast(... as DOUBLE)` on both operands (float arithmetic folds clean); values above 2^53
+in such computed columns would lose precision.

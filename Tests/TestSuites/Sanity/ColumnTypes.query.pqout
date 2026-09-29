@@ -1,0 +1,1 @@
+[ I64Kind = "number", F64Kind = "number", DecKind = "number", DateKind = "date", TextKind = "text" ] 
