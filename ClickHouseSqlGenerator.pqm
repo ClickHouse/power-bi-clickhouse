@@ -231,7 +231,9 @@ let
             Type.Is(foldedArg[Type], type nullable date) or
             Type.Is(foldedArg[Type], type nullable datetime) or
             Type.Is(foldedArg[Type], type nullable text)
-        then Invocation({Argument(foldedArg, null)}, functionName)
+        // Declare the result type = the input type (MIN over dates yields a date); the plain
+        // Invocation helper would stamp a default Int64 type on the node.
+        then InvocationWithType({Argument(foldedArg, null)}, functionName, foldedArg[Type])
         else ...,
 
     // CH-native date helpers. Return types match M semantics, verified against CH 26.5:
@@ -289,7 +291,9 @@ let
                 foldedArg = visitor(ast[Arguments]{0})
             in
                 if GetListCount(ast[Arguments]) = 1 and groupKeys <> null and Type.Is(foldedArg[Type], type number)
-                then Invocation({Argument(foldedArg, null)}, "AVG")
+                // ClickHouse avg always returns Float64 (verified incl. Decimal inputs); the plain
+                // Invocation helper would stamp a default Int64 type on the node.
+                then InvocationWithType({Argument(foldedArg, null)}, "AVG", doubleTypeWithFacets)
                 else ...,
 
         List.Max = (visitor, rowType, groupKeys, ast) =>
