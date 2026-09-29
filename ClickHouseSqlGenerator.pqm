@@ -432,6 +432,22 @@ let
 
     Override = [
         SqlGetTypeInfo = SqlGetTypeInfo,
+        // Declare integer-family types as implicitly compatible so the engine compares them
+        // directly instead of wrapping the column as cast("col" as DOUBLE) when a filter literal
+        // is a narrower integer type — that cast defeats ClickHouse skip indexes (e.g. a
+        // bloom_filter index is bypassed entirely, forcing a full scan). Cells are SqlTypeName
+        // strings from SqlGetTypeInfo; each unordered pair may appear only once.
+        ImplicitTypeConversions = #table(
+            {"Type1", "Type2", "ResultType"},
+            {
+                {"BIGINT", "INTEGER", "BIGINT"},
+                {"BIGINT", "SMALLINT", "BIGINT"},
+                {"BIGINT", "TINYINT", "BIGINT"},
+                {"INTEGER", "SMALLINT", "INTEGER"},
+                {"INTEGER", "TINYINT", "INTEGER"},
+                {"SMALLINT", "TINYINT", "SMALLINT"}
+            }
+        ),
         SqlCapabilities = [
             LimitClauseKind = LimitClauseKind.LimitOffset
         ],
