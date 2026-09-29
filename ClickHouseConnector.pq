@@ -286,7 +286,10 @@ let
 
             Port = port ,
             Database = database,  
-            ClientName = "PowerBi/" & ConnectorVersion,
+            // Identifies the implementation path server-side (system.query_log http_user_agent).
+            // The ADBC path cannot send an equivalent yet: the Flight server does not read any
+            // client-identity metadata (candidate server-side ask).
+            ClientName = "PowerBi/" & ConnectorVersion & "-odbc",
             SQLCompatibilitySettings = 1,
             
             // These fields come from the options record, so they might be null.
@@ -869,7 +872,10 @@ ClickHouseAdbcConnection = (server as text, port as number, optional database as
             // ("Unexpected error in RPC handling (Unknown; AuthenticateBasicToken)") unless the
             // session cookie is echoed back. Cookie middleware (off by default in the driver)
             // keeps the pooled connection authenticated across calls.
-            #"adbc.flight.sql.rpc.with_cookie_middleware" = "true"
+            #"adbc.flight.sql.rpc.with_cookie_middleware" = "true",
+            // Client identification, recorded in system.query_log.client_name on servers that
+            // read this header; older servers ignore unknown gRPC metadata (harmless).
+            #"adbc.flight.sql.rpc.call_header.x-clickhouse-client-name" = "PowerBi/" & ConnectorVersion & "-adbc"
         ],
         Connection = Adbc.Connection(Driver, ConnectionString, [], [ConnectionPoolType = 2]),
         Exec = (sql as text, isMeta as logical) as table =>
