@@ -1,0 +1,44 @@
+# ClickHouse version matrix for connector testing.
+# Each service = one ClickHouse version with Arrow Flight enabled. Fixtures are seeded by
+# run-tests.sh after the container is healthy (initdb is avoided on purpose: on some versions
+# the entrypoint's temporary init-server holds the Flight port and the real server can't bind).
+#   docker compose --profile 26.8 up -d --wait
+#   docker compose --profile all up -d --wait
+# Host ports: flight 91XX, http 81XX (XX = version slug).
+name: pbi-connector-tests
+
+x-ch-common: &ch-common
+  environment:
+    CLICKHOUSE_PASSWORD: clickhouse
+  volumes:
+    - ./arrowflight.xml:/etc/clickhouse-server/config.d/arrowflight.xml:ro
+    - ../Fixtures/seed.sql:/seed.sql:ro
+  ulimits:
+    nofile: { soft: 262144, hard: 262144 }
+  healthcheck:
+    test: ["CMD", "clickhouse-client", "--password", "clickhouse", "--query", "SELECT 1"]
+    interval: 2s
+    timeout: 5s
+    retries: 60
+
+services:
+  ch-26-5:
+    <<: *ch-common
+    image: clickhouse/clickhouse-server:26.5
+    profiles: ["26.5", "all"]
+    ports: ["9105:9407", "8105:8123"]
+  ch-26-6:
+    <<: *ch-common
+    image: clickhouse/clickhouse-server:26.6
+    profiles: ["26.6", "all"]
+    ports: ["9106:9407", "8106:8123"]
+  ch-26-8:
+    <<: *ch-common
+    image: clickhouse/clickhouse-server:26.8
+    profiles: ["26.8", "all"]
+    ports: ["9108:9407", "8108:8123"]
+  ch-latest:
+    <<: *ch-common
+    image: clickhouse/clickhouse-server:latest
+    profiles: ["latest", "all"]
+    ports: ["9110:9407", "8110:8123"]
