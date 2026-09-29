@@ -841,7 +841,14 @@ ClickHouseTablesNav = (context as record, db as text) as table =>
 ClickHouseDatabasesNav = (context as record, optional database as nullable text) as table =>
     let
         databases = Table.RenameColumns(context[Exec]("SHOW DATABASES", true), {{"name", "Name"}}),
-        filtered = Table.SelectRows(databases, each database = null or [Name] = database),
+        // Hide the INFORMATION_SCHEMA compatibility aliases from browsing (both spellings are
+        // views over the same schema — duplicate noise); an explicitly requested database is
+        // always honored, so they remain reachable via the Database parameter.
+        filtered = Table.SelectRows(
+            databases,
+            each if database <> null then [Name] = database
+                 else not List.Contains({"INFORMATION_SCHEMA", "information_schema"}, [Name])
+        ),
         withData = Table.AddColumn(filtered, "Data", each ClickHouseTablesNav(context, [Name]), type table),
         withItemKind = Table.AddColumn(withData, "ItemKind", each "Database", type text),
         withItemName = Table.AddColumn(withItemKind, "ItemName", each "Database", type text),
