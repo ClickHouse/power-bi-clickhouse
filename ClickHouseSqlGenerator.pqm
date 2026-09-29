@@ -105,6 +105,8 @@ let
     one = AdbcConstants[one],
 
     Argument = AdbcHelpers[Argument],
+    SingleListElement = AdbcHelpers[SingleListElement],
+    InExpression = AdbcHelpers[InExpression],
     Invocation = AdbcHelpers[Invocation],
     InvocationWithType = AdbcHelpers[InvocationWithType],
     BinaryOperation = AdbcHelpers[BinaryOperation],
@@ -255,6 +257,22 @@ let
 
     // --- Aggregate + arithmetic FunctionOverrides (CH-safe ANSI SQL) -------------------------
     FunctionOverrides = [
+        // Multi-value membership filter (multi-select slicers fold to this): emit an IN list.
+        // Only folds when the list is a constant; a 1-element list folds to a plain equality.
+        List.Contains = (visitor, rowType, groupKeys, ast) =>
+            if ast[Kind] = "Invocation" and ast[Function][Kind] = "Constant"
+                and ast[Function][Value] = List.Contains and GetListCount(ast[Arguments]) = 2 then
+                let
+                    arg1 = ast[Arguments]{0},
+                    result =
+                        if arg1[Kind] = "Constant" and Type.Is(Value.Type(arg1[Value]), type list) then
+                            if GetListCount(arg1[Value]) = 1
+                            then SingleListElement(ast, visitor)
+                            else InExpression(ast[Arguments], visitor)
+                        else ...
+                in
+                    result
+            else ...,
         List.Sum = (visitor, rowType, groupKeys, ast) =>
             if GetListCount(ast[Arguments]) = 1 or GetListCount(ast[Arguments]) = 2
             then
