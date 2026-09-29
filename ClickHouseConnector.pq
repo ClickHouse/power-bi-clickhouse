@@ -791,7 +791,12 @@ MapClickHouseType = (chType as text) as type =>
         spec =
             if Text.StartsWith(b, "Decimal") then [m = Decimal.Type, n = "DECIMAL"]
             else if Text.StartsWith(b, "FixedString") then [m = type text, n = "VARCHAR"]
-            else if Text.StartsWith(b, "DateTime") then [m = type datetime, n = "TIMESTAMP"]
+            // DateTime64 arrives as a real Arrow timestamp; plain DateTime arrives as raw
+            // uint32 epoch seconds (server-side Arrow writer gap), so declaring it datetime
+            // would fail the whole load — surface it as a BIGINT of epoch seconds instead.
+            else if Text.StartsWith(b, "DateTime64") then [m = type datetime, n = "TIMESTAMP"]
+            else if Text.StartsWith(b, "DateTime") then
+                Diagnostics.LogValue("MapClickHouseType: plain DateTime surfaced as epoch seconds", [m = Int64.Type, n = "BIGINT"])
             else if b = "Date" or b = "Date32" then [m = type date, n = "DATE"]
             else if b = "Float32" or b = "Float64" then [m = Double.Type, n = "DOUBLE"]
             else if b = "Bool" then [m = type logical, n = "BOOLEAN"]
