@@ -92,7 +92,7 @@ let
         }
     ),
 
-    // --- Extension/helper plumbing (mirrors Spice SqlGenerator.pqm) ---------------------------
+    // --- Extension/helper plumbing -------------------------------------------------------------
     Extension.LoadExpression = (name as text) =>
         let
             binary = Extension.Contents(name), asText = Text.FromBinary(binary)
@@ -213,8 +213,7 @@ let
     // Value.As / Value.ReplaceType fold as a passthrough when the asserted type is `any` or the
     // expression already satisfies it. DAX-generated DirectQuery queries wrap expressions in
     // these type assertions constantly (plain Power Query steps rarely do) — without this
-    // override, every DAX measure fails with "We couldn't fold the expression". Ported from the
-    // Snowflake/Spice reference connectors (identical in both).
+    // override, every DAX measure fails with "We couldn't fold the expression".
     ValueAsAndReplaceType = (visitor, ast) =>
         if GetListCount(ast[Arguments]) = 2 then
             let
@@ -323,8 +322,7 @@ let
             else ...,
 
         // Row count: arg is the group's sub-table, not a column. uniqExact(cols) when it's
-        // Table.Distinct(Table.SelectColumns(...)) (exact distinct count, same pattern Snowflake
-        // folds to approx_count_distinct); otherwise COUNT(1).
+        // Table.Distinct(Table.SelectColumns(...)) (exact distinct count); otherwise COUNT(1).
         Table.RowCount = (visitor, rowType, groupKeys, ast) =>
             if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
             then
@@ -333,8 +331,7 @@ let
                     else InvocationWithType({Argument(one, null)}, "COUNT", integerTypeWithFacets)
             else ...,
 
-        // Power BI's approximate distinct count (Snowflake folds this to approx_count_distinct);
-        // ClickHouse's native approximate-distinct is uniq(...).
+        // Power BI's approximate distinct count; ClickHouse's native approximate-distinct is uniq(...).
         Table.ApproximateRowCount = (visitor, rowType, groupKeys, ast) =>
             if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
             then
