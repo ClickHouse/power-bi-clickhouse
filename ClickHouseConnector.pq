@@ -914,7 +914,11 @@ ClickHouseAdbcConnection = (server as text, port as number, optional database as
                     in
                         aligned
             ]),
-        UniqueId = "clickhouse:" & server & ":" & Text.From(port) & ":" & (if database = null then "" else database),
+        // Every option that changes SQL generation must be part of the key — the engine caches
+        // the folding machinery by UniqueId, and two sources differing only in such an option
+        // would otherwise share one cached generator.
+        UniqueId = "clickhouse:" & server & ":" & Text.From(port) & ":" & (if database = null then "" else database)
+            & ":hp=" & (if highPrecision = false then "0" else "1"),
         FoldGen = SqlView.Generator(UniqueId, ClickHouseSqlGenerator(highPrecision), GetData),
         context = [Exec = Exec, FoldGen = FoldGen]
     in
