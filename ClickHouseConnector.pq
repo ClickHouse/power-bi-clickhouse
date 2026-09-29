@@ -793,7 +793,7 @@ MapClickHouseType = (chType as text) as type =>
             else if b = "Float32" or b = "Float64" then [m = Double.Type, n = "DOUBLE"]
             else if b = "Bool" then [m = type logical, n = "BOOLEAN"]
             else if List.Contains({"Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64"}, b) then [m = Int64.Type, n = "BIGINT"]
-            else [m = type text, n = "VARCHAR"],
+            else Diagnostics.LogValue("MapClickHouseType: unmapped type '" & b & "' falls back to", [m = type text, n = "VARCHAR"]),
         baseType = if isNullable then type nullable (spec[m]) else spec[m]
     in
         Type.ReplaceFacets(baseType, [NativeTypeName = spec[n]]);
@@ -802,7 +802,10 @@ MapClickHouseType = (chType as text) as type =>
 // catalog); SqlView.Generator then pushes Power Query operations down into ClickHouse SQL.
 ClickHouseLeafTable = (context as record, db as text, tbl as text) as table =>
     let
-        described = context[Exec]("DESCRIBE TABLE " & ChQuote(db) & "." & ChQuote(tbl), true),
+        described = Diagnostics.LogValue(
+            "ClickHouseLeafTable: DESCRIBE " & db & "." & tbl,
+            context[Exec]("DESCRIBE TABLE " & ChQuote(db) & "." & ChQuote(tbl), true)
+        ),
         colNames = described[name],
         colTypes = described[type],
         fields = Record.FromList(
@@ -851,7 +854,12 @@ ClickHouseAdbcConnection = (server as text, port as number, optional database as
         Credential = Extension.CurrentCredential(),
         ConnectionString = [
             // TLS (grpc+tls) is not supported yet; plaintext grpc only.
-            uri = "grpc://" & server & ":" & Text.From(port),
+            // NB: only the uri is traced here — credentials must never be logged.
+            uri = Diagnostics.LogValue(
+                "ClickHouseAdbcConnection: uri (database=" & (database ?? "<null>")
+                    & ", highPrecision=" & (if highPrecision = false then "false" else "true") & ")",
+                "grpc://" & server & ":" & Text.From(port)
+            ),
             // Basic auth via the driver's username/password (AuthenticateBasicToken handshake).
             username = Credential[Username],
             password = Credential[Password],
@@ -864,7 +872,12 @@ ClickHouseAdbcConnection = (server as text, port as number, optional database as
             #"adbc.flight.sql.rpc.with_cookie_middleware" = "true"
         ],
         Connection = Adbc.Connection(Driver, ConnectionString, [], [ConnectionPoolType = 2]),
-        Exec = (sql as text, isMeta as logical) as table => Connection[ExecuteQuery](sql, null, [IsMetadata = isMeta]),
+        Exec = (sql as text, isMeta as logical) as table =>
+            Connection[ExecuteQuery](
+                Diagnostics.LogValue("ClickHouseAdbcConnection: ExecuteQuery" & (if isMeta then " (metadata)" else ""), sql),
+                null,
+                [IsMetadata = isMeta]
+            ),
         // SqlView.Generator calls GetData with a folded SQL query + the computed result type;
         // we execute the SQL and align column names to the declared result type.
         GetData = (query as text, resultType as type, ctx) as table =>
