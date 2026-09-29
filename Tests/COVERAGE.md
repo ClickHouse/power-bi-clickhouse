@@ -47,5 +47,6 @@ Legend: FOLDED = generated SQL verified in system.query_log · VALUES = results 
 | Piece | Test(s) | Level |
 |---|---|---|
 | ImplicitTypeConversions | FilterEquals, FilterRangeGroupBy | FOLDED (cast-free filters) |
+| Value.NativeQuery (OnNativeQuery handler) | Functions/NativeQuery | VALUES (raw SQL incl. SETTINGS) |
 | SqlCapabilities.LimitClauseKind | SortFirstN | FOLDED |
 | Binary/UnaryOperatorOverrides | empty — pending MS documentation | n/a |

@@ -920,6 +920,16 @@ ClickHouseAdbcConnection = (server as text, port as number, optional database as
         UniqueId = "clickhouse:" & server & ":" & Text.From(port) & ":" & (if database = null then "" else database)
             & ":hp=" & (if highPrecision = false then "0" else "1"),
         FoldGen = SqlView.Generator(UniqueId, ClickHouseSqlGenerator(highPrecision), GetData),
-        context = [Exec = Exec, FoldGen = FoldGen]
+        context = [Exec = Exec, FoldGen = FoldGen],
+        Nav = ClickHouseDatabasesNav(context, database)
     in
-        ClickHouseDatabasesNav(context, database);
+        // Value.NativeQuery(source, "...") support: run the statement verbatim on the server
+        // (SETTINGS clauses and ClickHouse-specific functions included). Query parameters are
+        // not supported yet: the engine rejects parameterized calls before reaching this handler
+        // (verified); the null-check below is defense in depth.
+        Table.View(Nav, [
+            OnNativeQuery = (cmd, params, options) =>
+                if params = null then Exec(cmd, false)
+                else error Error.Record("Expression.Error", "Native query parameters are not supported yet."),
+            ThrowFoldingFailures = false
+        ]);
