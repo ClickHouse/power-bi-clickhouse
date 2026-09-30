@@ -50,7 +50,7 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 
 | Test | Field | Expected |
 |---|---|---|
-| Sanity/LoadTable | rows per table | numbers 5, dates 3, text 4, division 3, big_ids 4, events 100 |
+| Sanity/LoadTable | rows per table | numbers 5, dates 3, text 5, division 3, big_ids 4, events 100 |
 | Folding/FilterEquals | Rows / Rid | 1 / 4 |
 | Folding/FilterRangeGroupBy | Groups / FirstName / FirstTotal / FirstCnt | 10 / name_0 / 43.75 / 5 |
 | Folding/SortFirstN | Ids | 99,98,97 |
@@ -75,6 +75,7 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 | Functions/SumPrecisionDecimal | SumDecimalPrecision | 3.5 (folds as SUM(cast(f64 as Decimal(38, 10)))) |
 | Functions/ValueAsFold | VA | 100000 (pure passthrough) |
 | Functions/NativeQuery | FirstName / FirstTotal / Rows / UniqWithSettings | name_0 / 1.25 / 2 / 10 |
+| Folding/EscapedLiterals | EqualityRows / Rid / ContainsRows | 1 / 5 / 1 |
 | Functions/TextPredicates | ContainsRows / StartsRows / EndsRows | 1 / 1 / 1 |
 | KnownIssues/NullableColumns | SumV / SumN / Rows / BigN | 4 / 60 / 4 / 2 |
 | KnownIssues/PlainDateTime | Rows / DtEpoch / Dt64Text | 2 / 1709209845 / 2024-02-29 12:30:45 |

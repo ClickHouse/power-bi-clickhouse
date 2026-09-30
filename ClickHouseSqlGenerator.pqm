@@ -15,7 +15,7 @@
 (optional highPrecision as logical) =>
 let
     PreserveDecimal = highPrecision <> false,
-    GetNumberLiteral = (value as number) => Number.ToText(value),
+    GetNumberLiteral = (value as number) => Number.ToText(value, null, "en-US"),
     TypeInfo = Extension.LoadExpression("TypeInfo.pqm"),
     AddUnsignedAttribute = Table.AddColumn(TypeInfo, "UnsignedAttribute", each if [Unsigned] = true then 1 else 0),
     SelectTypeInfoColumns = Table.SelectColumns(

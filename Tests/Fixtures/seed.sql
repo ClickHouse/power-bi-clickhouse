@@ -131,3 +131,5 @@ ENGINE = MergeTree ORDER BY rid;
 INSERT INTO pqtest.datetimes VALUES
     (1, '2024-02-29 12:30:45', '2024-02-29 12:30:45.123'),
     (2, '2020-01-01 00:00:00', '2020-01-01 00:00:00.000');
+
+INSERT INTO pqtest.text VALUES (5, 'O''Brien \\ C:\\dir\\name', 'delta', NULL);
