@@ -51,9 +51,10 @@ build_and_push_mez() {
   "$REPO_DIR/build-mez.sh" > /dev/null
   scp -q "${KEYOPT[@]}" -P "$VM_SSH_PORT" "$SCRIPT_DIR/docker/run-suites.ps1" "$VM_SSH_DEST:$VM_TESTS/run-suites.ps1"
   scp -q "${KEYOPT[@]}" -P "$VM_SSH_PORT" "$REPO_DIR/ClickHouse.mez" "$VM_SSH_DEST:$VM_TESTS/ClickHouse.mez"
-  # sync test files (queries only; snapshots are compared, not regenerated, on CI-style runs)
+  # sync test files (queries + snapshots; the repo is the source of truth, snapshots are
+  # compared, not regenerated, on CI-style runs)
   for d in Sanity Folding KnownIssues Functions; do
-    scp -q "${KEYOPT[@]}" -P "$VM_SSH_PORT" "$SCRIPT_DIR/TestSuites/$d/"*.query.pq "$VM_SSH_DEST:$VM_TESTS/Tests/TestSuites/$d/" 2>/dev/null || true
+    scp -q "${KEYOPT[@]}" -P "$VM_SSH_PORT" "$SCRIPT_DIR/TestSuites/$d/"*.query.pq "$SCRIPT_DIR/TestSuites/$d/"*.pqout "$VM_SSH_DEST:$VM_TESTS/Tests/TestSuites/$d/" 2>/dev/null || true
   done
 }
 

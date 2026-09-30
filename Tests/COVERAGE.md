@@ -30,6 +30,7 @@ Legend: FOLDED = generated SQL verified in system.query_log · VALUES = results 
 | List.Count plain / distinct spelling (null-preserving) | Aggregates, FilterRangeGroupBy / DistinctCountListShape, NullSemantics | FOLDED |
 | Table.RowCount plain + distinct (null-preserving) | FilterRangeGroupBy, GroupDistinctCount, NullSemantics | FOLDED |
 | Table.ApproximateRowCount | ApproxDistinct | FOLDED |
+| Outer joins (folding disabled: join_use_nulls = 0 breaks null semantics) | OuterJoinNulls | LOCAL by design |
 | Value.Add/Subtract/Multiply | Arithmetic | FOLDED |
 | Value.Divide | DecimalDivision | VALUES (folded form captured in comparison runs) |
 | Value.As / ReplaceType | Functions/ValueAsFold | FOLDED (pure passthrough) |

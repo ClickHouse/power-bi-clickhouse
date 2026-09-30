@@ -79,6 +79,7 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 | Functions/TextPredicates | ContainsRows / StartsRows / EndsRows | 1 / 1 / 1 |
 | KnownIssues/NullableColumns | SumV / SumN / Rows / BigN | 4 / 60 / 4 / 2 |
 | KnownIssues/NullSemantics | CountWithNulls / DistinctWithNull / TableDistinct / MultiColDistinct / MemberWithNull / MemberOnlyNull / MemberPlain / MemberEmpty | 4 / 4 / 4 / 4 / 2 / 1 / 2 / 0 |
+| KnownIssues/OuterJoinNulls | Rows / NullA | 5 / 2 |
 | KnownIssues/PlainDateTime | Rows / DtEpoch / Dt64Text | 2 / 1709209845 / 2024-02-29 12:30:45 |
 
 ## What the suites guard
@@ -92,6 +93,11 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 - **KnownIssues/NullSemantics** — folded counts, distinct counts, and membership filters over
   nullable columns must match M's null semantics (M counts nulls and treats null as a distinct
   value; plain SQL aggregates and `IN` skip them).
+- **KnownIssues/OuterJoinNulls** — outer merges must carry null for unmatched rows. With
+  ClickHouse's default `join_use_nulls = 0` a folded outer join fills type defaults (0, ''),
+  so outer-join folding is disabled until the Arrow Flight SQL interface supports
+  per-connection settings (then it can be re-enabled with `join_use_nulls = 1` pinned);
+  this fails if it is ever re-enabled without null preservation.
 - **Folding/** — results are validated end to end; to additionally inspect the generated SQL,
   check the ClickHouse query log (`system.query_log`, `interface = 10`) or the server trace log.
 
