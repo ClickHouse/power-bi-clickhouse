@@ -517,7 +517,19 @@ let
             }
         ),
         SqlCapabilities = [
-            LimitClauseKind = LimitClauseKind.LimitOffset
+            LimitClauseKind = LimitClauseKind.LimitOffset,
+            // Outer joins are NOT folded: with ClickHouse's default join_use_nulls = 0,
+            // unmatched rows are filled with type defaults (0, '') instead of NULL, which
+            // silently changes merge results vs M semantics. Workaround until the ClickHouse
+            // Arrow Flight SQL interface supports per-connection settings (the connection is
+            // stateless per call today, so join_use_nulls = 1 cannot be enforced from the
+            // connector); once it does, folding can be re-enabled with that setting pinned.
+            // Until then outer merges evaluate locally instead.
+            SupportedSql92RelationalJoinOperators = [
+                FullOuterJoin = false,
+                LeftOuterJoin = false,
+                RightOuterJoin = false
+            ]
         ],
         FunctionOverrides = FunctionOverrides,
         BinaryOperatorOverrides = [],
