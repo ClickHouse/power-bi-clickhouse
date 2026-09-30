@@ -170,12 +170,18 @@ let
 
     // Coerce an aggregate/arithmetic argument to the precision Power Query asked for.
     //
+    // `precision` is null when the M call did not pass one. An EXPLICIT precision is always
+    // honored: Precision.Double coerces non-floating operands to DOUBLE (ClickHouse Decimal
+    // arithmetic keeps the dividend's scale — 1.00 / 3.00 is 0.33, not the IEEE result — so a
+    // pass-through would disregard the request), and Precision.Decimal coerces floating
+    // operands to parameterized Decimal(38, 10) — never bare DECIMAL (= Decimal(10,0), which
+    // silently truncates).
+    //
+    // Without an explicit precision:
     // HighPrecision (PreserveDecimal, default ON): pass operands through UNTOUCHED and let
     // ClickHouse's native arithmetic semantics apply — no cast("col" as DOUBLE) wrapping.
-    // This is safe on ClickHouse specifically: `/` is always floating-point (1/2 = 0.5 — no
-    // integer-division trap) and Decimal arithmetic stays Decimal. The one cast kept is an
-    // explicitly REQUESTED Precision.Decimal on a floating operand — emitted as parameterized
-    // Decimal(38, 10), never bare DECIMAL (= Decimal(10,0), which silently truncates).
+    // This is the documented point of the option: Decimal stays Decimal (exact sums), and `/`
+    // on ClickHouse is always floating-point (1/2 = 0.5 — no integer-division trap).
     // Note: we cannot rely on operand facets here — the engine strips NativeTypeName from
     // arithmetic operands (aggregate args keep them, which is why SUM("amount") folds uncast).
     //
@@ -188,17 +194,21 @@ let
         in
             if Type.Is(value[Type], type number) or Type.Is(value[Type], type nullable number)
             then
-                if PreserveDecimal
+                if (precision = Precision.Decimal)
                 then
-                    if (List.Contains(floatingPoint, nativeType) and precision = Precision.Decimal)
+                    if List.Contains(floatingPoint, nativeType)
                     then CastSqlExpression(value, decimalCastTypeWithFacets)
                     else value
+                else if (precision = Precision.Double)
+                then
+                    if List.Contains(floatingPoint, nativeType)
+                    then value
+                    else CastSqlExpression(value, doubleTypeWithFacets)
+                else if PreserveDecimal
+                then value
                 else
                     if (List.Contains(floatingPoint, nativeType))
-                    then
-                        if (precision = Precision.Double) then value
-                        else CastSqlExpression(value, decimalCastTypeWithFacets)
-                    else if (precision = Precision.Decimal) then value
+                    then value
                     else CastSqlExpression(value, doubleTypeWithFacets)
             else ...,
 
@@ -210,22 +220,42 @@ let
                 value2 = visitor(ast[Arguments]{1}),
                 // Defensive: the 3rd (precision) arg is normally a Constant; if the host passes
                 // anything else, [Value] would THROW inside the override and kill the fold.
+                // A missing precision means Precision.Double in M (verified against local
+                // evaluation), and the engine's own `/` operator path coerces to DOUBLE the
+                // same way — so folded and local results agree. HighPrecision pass-through
+                // applies to aggregates (List.Sum et al.), not to Value.* arithmetic.
                 value3 = if GetListCount(ast[Arguments]) = 3 then (try ast[Arguments]{2}[Value] otherwise Precision.Double) else Precision.Double,
-                firstArg = ValueFunctionsArgumentsVisitor(value1, value3),
+                // ClickHouse Decimal division keeps the DIVIDEND's scale and truncates the rest
+                // (1.00 / 3.00 = 0.33). Under an explicit Precision.Decimal, widen the dividend
+                // to Decimal(38, 10) so the result has a defined, useful scale. (M's decimal is
+                // 28 significant digits; digits beyond scale 10 still differ — documented
+                // deviation, same family as the bare-DECIMAL note above.)
+                firstArg = if operation = "Divide" and value3 = Precision.Decimal
+                    then CastSqlExpression(value1, decimalCastTypeWithFacets)
+                    else ValueFunctionsArgumentsVisitor(value1, value3),
                 secondArg = ValueFunctionsArgumentsVisitor(value2, value3)
             in
                 BinaryOperation(firstArg, operation, secondArg)
         else ...,
 
     // Double.From / Number.From on an already-numeric argument. See the override comment below.
+    // A Double.From over a known Decimal operand is a REAL conversion (ClickHouse Decimal
+    // arithmetic truncates where IEEE doubles don't), so it is coerced even under
+    // HighPrecision. Floating operands pass through (already double); operands whose native
+    // type the engine stripped stay untouched — casting blindly would reintroduce
+    // cast("col" as DOUBLE) into folded filters, which bypasses skip indexes.
     NumericFromHelper = (visitor, ast) =>
         if GetListCount(ast[Arguments]) = 1
         then
             let
-                arg = visitor(ast[Arguments]{0})
+                arg = visitor(ast[Arguments]{0}),
+                nativeType = try Type.Facets(arg[Type])[NativeTypeName] otherwise null
             in
                 if Type.Is(arg[Type], type number) or Type.Is(arg[Type], type nullable number)
-                then (if PreserveDecimal then arg else CastSqlExpression(arg, doubleTypeWithFacets))
+                then
+                    if PreserveDecimal
+                    then (if nativeType = "DECIMAL" then CastSqlExpression(arg, doubleTypeWithFacets) else arg)
+                    else CastSqlExpression(arg, doubleTypeWithFacets)
                 else ...
         else ...,
 
@@ -322,7 +352,7 @@ let
             then
                 let
                     value1 = visitor(ast[Arguments]{0}),
-                    value2 = if GetListCount(ast[Arguments]) = 2 then (try ast[Arguments]{1}[Value] otherwise Precision.Double) else Precision.Double,
+                    value2 = if GetListCount(ast[Arguments]) = 2 then (try ast[Arguments]{1}[Value] otherwise null) else null,
                     firstArg = ValueFunctionsArgumentsVisitor(value1, value2)
                 in
                     InvocationWithType({Argument(firstArg, null)}, "SUM", firstArg[Type])
@@ -400,9 +430,9 @@ let
         // The DAX DirectQuery layer wraps row-level arithmetic operands in Double.From(...)
         // (DAX math is double-based). Without this override every DAX measure doing row-level
         // arithmetic (e.g. SUMX(t, [a]/[b])) fails to fold — trace: "The function Double.From
-        // is not valid." For numeric args: under HighPrecision pass through (ClickHouse native
-        // arithmetic; Decimal/Decimal stays exact), otherwise cast to DOUBLE for M-faithful
-        // double semantics. Number.From gets the same treatment (same conversion family).
+        // is not valid." Coercion rules live in NumericFromHelper (known Decimal operands are
+        // cast to DOUBLE — a real conversion; floating/unknown operands pass through).
+        // Number.From gets the same treatment (same conversion family).
         Double.From = (visitor, rowType, groupKeys, ast) => NumericFromHelper(visitor, ast),
         Number.From = (visitor, rowType, groupKeys, ast) => NumericFromHelper(visitor, ast),
 
