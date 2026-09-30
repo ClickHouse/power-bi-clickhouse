@@ -476,26 +476,41 @@ let
         Date.AddYears = (visitor, rowType, groupKeys, ast) =>
             if GetListCount(ast[Arguments]) = 2 then DateAddHelper(visitor, ast, "addYears") else ...,
 
-        // --- Text (CH-native) -----------------------------------------------------------------
-        // Text.Start/End/Length/Replace/Lower/Upper/Trim*/Repeat already fold via the Sql92 base
-        // to names ClickHouse accepts (LEFT/RIGHT/Length/REPLACE/...). The overrides below cover
-        // the rest, e.g. Text.Start(s, Text.PositionOf(s, "-")) -> LEFT(s, position(s, '-') - 1).
+        // --- Text (CH-native, character-aware) --------------------------------------------------
+        // M text functions count CHARACTERS; ClickHouse's plain position/length/substring and
+        // LEFT/RIGHT/lower/upper count BYTES (or are ASCII-only), which diverges on any
+        // multi-byte UTF-8 content (Text.PositionOf("éx", "x") is 1, byte position() says 2).
+        // Index/length/case functions are therefore mapped to the *UTF8 variants (present in
+        // all stock ClickHouse builds — they require ICU, so a from-source build without ICU
+        // lacks lowerUTF8/upperUTF8). Pure MATCHING functions (Contains/StartsWith/EndsWith/
+        // Replace) stay byte-based: matching a whole valid-UTF-8 needle byte-wise is exact
+        // (UTF-8 is self-synchronizing) and cheaper. Trim folding is declined below instead —
+        // ClickHouse trims ASCII space only, M trims all whitespace.
+        Text.Length = "lengthUTF8",
+        Text.Start = "leftUTF8",
+        Text.End = "rightUTF8",
+        Text.Lower = "lowerUTF8",
+        Text.Upper = "upperUTF8",
+        Text.TrimStart = null,
+        Text.TrimEnd = null,
 
-        // M Text.PositionOf is 0-based and returns -1 when absent; CH position() is 1-based and
-        // returns 0 when absent — so position(s, sub) - 1 matches M exactly (incl. not-found).
+        // M Text.PositionOf is 0-based and returns -1 when absent; CH positionUTF8() is 1-based
+        // (in characters) and returns 0 when absent — so positionUTF8(s, sub) - 1 matches M
+        // exactly (incl. not-found).
         Text.PositionOf = (visitor, rowType, groupKeys, ast) =>
             if GetListCount(ast[Arguments]) = 2
             then
                 let
                     str = Argument(visitor(ast[Arguments]{0}), textTypeWithFacets),
                     needle = Argument(visitor(ast[Arguments]{1}), textTypeWithFacets),
-                    pos = InvocationWithType({str, needle}, "position", integerTypeWithFacets)
+                    pos = InvocationWithType({str, needle}, "positionUTF8", integerTypeWithFacets)
                 in
                     BinaryOperation(pos, "Subtract", Literal("1"))
             else ...,
 
         // Base Sql92 folds Text.Contains/StartsWith/EndsWith to CONTAINS/StartsWith/EndsWith,
-        // none of which exist in ClickHouse (would emit invalid SQL). CH-native replacements:
+        // none of which exist in ClickHouse (would emit invalid SQL). CH-native replacements
+        // (byte position is fine here — only existence is tested, not the index):
         Text.Contains = (visitor, rowType, groupKeys, ast) =>
             if GetListCount(ast[Arguments]) = 2
             then
@@ -514,7 +529,7 @@ let
         // SQL generators (verified — Text.PositionOf above folds via the same mechanism while
         // this override is never invoked; the same limitation exists on ODBC and on Microsoft's
         // first-party PostgreSQL connector). Kept so it starts folding to
-        // substringIndex(s, delim, 1) automatically if the engine ever adds routing.
+        // substringIndexUTF8(s, delim, 1) automatically if the engine ever adds routing.
         // Foldable equivalent users can write today: Text.Start(s, Text.PositionOf(s, delim)).
         Text.BeforeDelimiter = (visitor, rowType, groupKeys, ast) =>
             if GetListCount(ast[Arguments]) = 2
@@ -524,7 +539,7 @@ let
                     delim = Argument(visitor(ast[Arguments]{1}), textTypeWithFacets),
                     cnt = Argument(Literal("1"), integerTypeWithFacets)
                 in
-                    InvocationWithType({str, delim, cnt}, "substringIndex", textTypeWithFacets)
+                    InvocationWithType({str, delim, cnt}, "substringIndexUTF8", textTypeWithFacets)
             else ...
     ],
 
