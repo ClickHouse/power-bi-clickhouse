@@ -24,6 +24,13 @@ let
     // Explicit culture: SQL literals must not depend on the evaluation environment's locale
     // (decimal separators, digit shapes).
     GetNumberLiteral = (value as number) => Number.ToText(value, null, "en-US"),
+    // DECIMAL literals: the engine's default serialization appends a trailing dot
+    // ("18446744073709551615."), which ClickHouse parses as Float64 — rounding large values
+    // (2^64-1 becomes 2^64) and silently mismatching exact comparisons. An explicit CAST from
+    // a string keeps the full digits as a real Decimal (scale 10, matching the generator's
+    // Decimal(38, 10) cast convention).
+    GetDecimalLiteral = (value as number) =>
+        "CAST('" & Number.ToText(value, null, "en-US") & "' AS Decimal(38, 10))",
     GetTimeLiteral = (value as time) => Time.ToText(value, [Format = "HH:mm:ss.FFFFFFF", Culture = "en-US"]),
     GetDateLiteral = (value as date) => Date.ToText(value, [Format = "yyyy-MM-dd", Culture = "en-US"]),
     GetDateTimeLiteral = (value as datetime) as text =>
@@ -131,7 +138,7 @@ let
                 Type = Decimal.Type,
                 Unsigned = false,
                 ColumnSize = 76,
-                GetLiteral = GetNumberLiteral,
+                GetLiteral = GetDecimalLiteral,
                 Searchable = 2,
                 NumberPrecisionRadix = 10,
                 LiteralPrefix = null,

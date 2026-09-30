@@ -558,7 +558,14 @@ let
                 {"BIGINT", "TINYINT", "BIGINT"},
                 {"INTEGER", "SMALLINT", "INTEGER"},
                 {"INTEGER", "TINYINT", "INTEGER"},
-                {"SMALLINT", "TINYINT", "SMALLINT"}
+                {"SMALLINT", "TINYINT", "SMALLINT"},
+                // DECIMAL vs integer literals compare exactly in ClickHouse; without these the
+                // engine coerces through DOUBLE (cast("col" as DOUBLE) = <rounded literal>),
+                // which both defeats skip indexes and rounds int64-range literals.
+                {"DECIMAL", "BIGINT", "DECIMAL"},
+                {"DECIMAL", "INTEGER", "DECIMAL"},
+                {"DECIMAL", "SMALLINT", "DECIMAL"},
+                {"DECIMAL", "TINYINT", "DECIMAL"}
             }
         ),
         SqlCapabilities = [
