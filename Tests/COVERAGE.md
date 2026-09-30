@@ -25,10 +25,10 @@ Legend: FOLDED = generated SQL verified in system.query_log · VALUES = results 
 ## FunctionOverrides
 | Override | Test(s) | Level |
 |---|---|---|
-| List.Contains → IN/= | MultiValueFilter | FOLDED |
+| List.Contains → IN/= (null member → isNull branch) | MultiValueFilter, NullSemantics | FOLDED |
 | List.Sum / Average / Min / Max | FilterRangeGroupBy, Aggregates, AverageTypes, MinMaxDatesText | FOLDED |
-| List.Count plain / distinct spelling | Aggregates, FilterRangeGroupBy / DistinctCountListShape | FOLDED |
-| Table.RowCount plain + distinct | FilterRangeGroupBy, GroupDistinctCount | FOLDED |
+| List.Count plain / distinct spelling (null-preserving) | Aggregates, FilterRangeGroupBy / DistinctCountListShape, NullSemantics | FOLDED |
+| Table.RowCount plain + distinct (null-preserving) | FilterRangeGroupBy, GroupDistinctCount, NullSemantics | FOLDED |
 | Table.ApproximateRowCount | ApproxDistinct | FOLDED |
 | Value.Add/Subtract/Multiply | Arithmetic | FOLDED |
 | Value.Divide | DecimalDivision | VALUES (folded form captured in comparison runs) |

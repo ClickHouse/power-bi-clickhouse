@@ -78,6 +78,7 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 | Folding/EscapedLiterals | EqualityRows / Rid / ContainsRows | 1 / 5 / 1 |
 | Functions/TextPredicates | ContainsRows / StartsRows / EndsRows | 1 / 1 / 1 |
 | KnownIssues/NullableColumns | SumV / SumN / Rows / BigN | 4 / 60 / 4 / 2 |
+| KnownIssues/NullSemantics | CountWithNulls / DistinctWithNull / TableDistinct / MultiColDistinct / MemberWithNull / MemberOnlyNull / MemberPlain / MemberEmpty | 4 / 4 / 4 / 4 / 2 / 1 / 2 / 0 |
 | KnownIssues/PlainDateTime | Rows / DtEpoch / Dt64Text | 2 / 1709209845 / 2024-02-29 12:30:45 |
 
 ## What the suites guard
@@ -88,6 +89,9 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
   (guards against DOUBLE coercion in folded comparisons).
 - **KnownIssues/NestedAggregation** — aggregation over an aggregated subquery (the shape
   report visuals generate) must not fail on alias resolution.
+- **KnownIssues/NullSemantics** — folded counts, distinct counts, and membership filters over
+  nullable columns must match M's null semantics (M counts nulls and treats null as a distinct
+  value; plain SQL aggregates and `IN` skip them).
 - **Folding/** — results are validated end to end; to additionally inspect the generated SQL,
   check the ClickHouse query log (`system.query_log`, `interface = 10`) or the server trace log.
 
