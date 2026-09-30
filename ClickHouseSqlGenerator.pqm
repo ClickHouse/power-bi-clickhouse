@@ -103,6 +103,7 @@ let
     AdbcConstants = SqlGeneratorHelpers[Constants],
     funcName = SqlGeneratorHelpers[FunctionNames],
     one = AdbcConstants[one],
+    zero = AdbcConstants[zero],
 
     Argument = AdbcHelpers[Argument],
     SingleListElement = AdbcHelpers[SingleListElement],
@@ -124,10 +125,28 @@ let
     // to an explicit Decimal(38, 10) preserves the fraction.
     decimalCastTypeWithFacets = Type.ReplaceFacets(Decimal.Type, [NativeTypeName = "Decimal(38, 10)"]),
     integerTypeWithFacets = Type.ReplaceFacets(Number.Type, [NativeTypeName = "INTEGER"]),
+    booleanTypeWithFacets = Type.ReplaceFacets(Logical.Type, [NativeTypeName = "BOOLEAN"]),
     dateTypeWithFacets = Type.ReplaceFacets(Date.Type, [NativeTypeName = "DATE"]),
     datetimeTypeWithFacets = Type.ReplaceFacets(DateTime.Type, [NativeTypeName = "TIMESTAMP"]),
 
     GetListCount = (listvalue) => if listvalue = null then 0 else List.Count(listvalue),
+
+    // --- Null-preserving aggregate shapes (M counts nulls; SQL aggregates skip them) ---------
+    // M List.Count counts nulls: COUNT(assumeNotNull(x)) counts every row regardless of nulls.
+    NullSafeCount = (expr) =>
+        InvocationWithType(
+            {Argument(InvocationWithType({Argument(expr, null)}, "assumeNotNull", expr[Type]), null)},
+            "COUNT", integerTypeWithFacets),
+    // M List.Distinct keeps null as a value; uniq/uniqExact skip rows with NULL arguments.
+    // Wrapping the column(s) in tuple(...) preserves them (a tuple is never NULL), and keeps
+    // the folded node a plain aggregate invocation, which the engine requires for
+    // Table.ApproximateRowCount. Single columns are padded with a constant.
+    NullSafeDistinctCount = (chFunc, expr) =>
+        NullSafeDistinctCountMulti(chFunc, {Argument(expr, null), Argument(one, null)}),
+    NullSafeDistinctCountMulti = (chFunc, colArgs) =>
+        InvocationWithType(
+            {Argument(InvocationWithType(colArgs, "tuple", integerTypeWithFacets), null)},
+            chFunc, integerTypeWithFacets),
     GetListContains = (listvalue, value) => List.Contains(listvalue, value),
 
     // Safe AST matcher: returns an Invocation's Arguments if `node` is an Invocation of M
@@ -258,8 +277,10 @@ let
 
     // --- Aggregate + arithmetic FunctionOverrides (CH-safe ANSI SQL) -------------------------
     FunctionOverrides = [
-        // Multi-value membership filter (multi-select slicers fold to this): emit an IN list.
-        // Only folds when the list is a constant; a 1-element list folds to a plain equality.
+        // Multi-value membership (multi-select slicers). Only folds constant lists. M null
+        // semantics are preserved: a null member matches null rows (SQL IN never does) via an
+        // explicit isNull branch, and an empty list is constant false. Null-free lists use the
+        // stock IN/equality builders.
         List.Contains = (visitor, rowType, groupKeys, ast) =>
             if ast[Kind] = "Invocation" and ast[Function][Kind] = "Constant"
                 and ast[Function][Value] = List.Contains and GetListCount(ast[Arguments]) = 2 then
@@ -267,9 +288,31 @@ let
                     arg1 = ast[Arguments]{0},
                     result =
                         if arg1[Kind] = "Constant" and Type.Is(Value.Type(arg1[Value]), type list) then
-                            if GetListCount(arg1[Value]) = 1
-                            then SingleListElement(ast, visitor)
-                            else InExpression(ast[Arguments], visitor)
+                            let
+                                values = arg1[Value],
+                                nonNulls = List.Select(values, each _ <> null),
+                                hasNull = GetListCount(nonNulls) < GetListCount(values),
+                                strippedAst = [Arguments = {[Kind = "Constant", Value = nonNulls], ast[Arguments]{1}}],
+                                nonNullTest =
+                                    if GetListCount(nonNulls) = 1
+                                    then SingleListElement(strippedAst, visitor)
+                                    else InExpression(strippedAst[Arguments], visitor),
+                                // isNull(x) as a function call: operator-style nodes
+                                // (UnaryLogicalOperation) don't fold when returned from a
+                                // FunctionOverride, function invocations do.
+                                isNullTest =
+                                    InvocationWithType(
+                                        {Argument(visitor(ast[Arguments]{1}), null)},
+                                        "isNull", booleanTypeWithFacets)
+                            in
+                                if GetListCount(values) = 0 then BinaryLogicalOperation("Equals", one, zero)
+                                else if not hasNull then nonNullTest
+                                else if GetListCount(nonNulls) = 0 then isNullTest
+                                else
+                                    InvocationWithType({
+                                        Argument(isNullTest, null),
+                                        Argument(nonNullTest, null)
+                                    }, "or", booleanTypeWithFacets)
                         else ...
                 in
                     result
@@ -311,14 +354,15 @@ let
                 then MinMaxHelper(foldedArg, "MIN")
                 else ...,
 
-        // COUNT("col"), or uniqExact("col") when the arg is List.Distinct(col) (exact distinct count).
+        // M List.Count counts nulls, and List.Distinct keeps null as a value — both shapes are
+        // emitted null-preserving (see NullSafeCount / NullSafeDistinctCount).
         List.Count = (visitor, rowType, groupKeys, ast) =>
             if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
             then
                 let ld = MatchInvocation(ast[Arguments]{0}, List.Distinct, 1) in
                     if ld <> null
-                    then InvocationWithType({Argument(visitor(ld{0}), null)}, "uniqExact", integerTypeWithFacets)
-                    else InvocationWithType({Argument(visitor(ast[Arguments]{0}), null)}, "COUNT", integerTypeWithFacets)
+                    then NullSafeDistinctCount("uniqExact", visitor(ld{0}))
+                    else NullSafeCount(visitor(ast[Arguments]{0}))
             else ...,
 
         // Row count: arg is the group's sub-table, not a column. uniqExact(cols) when it's
@@ -327,17 +371,22 @@ let
             if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
             then
                 let cols = DistinctCols(visitor, ast[Arguments]{0}) in
-                    if cols <> null then InvocationWithType(cols, "uniqExact", integerTypeWithFacets)
-                    else InvocationWithType({Argument(one, null)}, "COUNT", integerTypeWithFacets)
+                    if cols = null then InvocationWithType({Argument(one, null)}, "COUNT", integerTypeWithFacets)
+                    else if List.Count(cols) = 1 then NullSafeDistinctCount("uniqExact", cols{0}[Expression])
+                    else NullSafeDistinctCountMulti("uniqExact", cols)
             else ...,
 
         // Power BI's approximate distinct count; ClickHouse's native approximate-distinct is uniq(...).
         Table.ApproximateRowCount = (visitor, rowType, groupKeys, ast) =>
             if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
             then
+                // Approximate path: kept as plain uniq(cols). The engine validates this
+                // override's folded node and rejects wrapped argument shapes, and the M contract
+                // is explicitly approximate — ClickHouse's native null-skipping uniq stays within
+                // that tolerance (exact distinct counts above ARE null-preserving).
                 let cols = DistinctCols(visitor, ast[Arguments]{0}) in
-                    if cols <> null then InvocationWithType(cols, "uniq", integerTypeWithFacets)
-                    else ...
+                    if cols = null then ...
+                    else InvocationWithType(cols, "uniq", integerTypeWithFacets)
             else ...,
 
         Value.Multiply = (visitor, rowType, groupKeys, ast) => ValueFunctions(visitor, ast, "Multiply"),
