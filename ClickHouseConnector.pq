@@ -798,22 +798,53 @@ Table.ToNavigationTable = (
 // Backtick-quote a ClickHouse identifier.
 ChQuote = (name as text) as text => "`" & Text.Replace(name, "`", "``") & "`";
 
+// Strip LowCardinality(...)/Nullable(...) wrappers from a DESCRIBE type string; returns
+// [Base = inner type, IsNullable = logical].
+UnwrapChType = (chType as text) as record =>
+    let
+        t0 = Text.Trim(chType),
+        t1 = if Text.StartsWith(t0, "LowCardinality(") then Text.Range(t0, 15, Text.Length(t0) - 16) else t0,
+        isNullable = Text.StartsWith(t1, "Nullable(")
+    in
+        [Base = Text.Trim(if isNullable then Text.Range(t1, 9, Text.Length(t1) - 10) else t1), IsNullable = isNullable];
+
+// Types the ADBC reader cannot fetch: FixedString/UUID/IPv6 and the 128/256-bit integers
+// arrive as Arrow fixed_size_binary and crash the result reader (verified — the failure is
+// not catchable with try); Decimal with precision > 38 is Arrow decimal256, which the driver
+// rejects and fails the whole table; JSON/Dynamic/Variant break the Arrow binary fallback.
+// Columns of these types are EXCLUDED from the table (traced below) instead of failing the
+// load — reach them through Value.NativeQuery with an explicit server-side conversion,
+// e.g. SELECT toString(fixed_string_col) ...
+IsUnsupportedChType = (chType as text) as logical =>
+    let
+        b = UnwrapChType(chType)[Base],
+        dec = if Text.StartsWith(b, "Decimal(") then
+                  try Number.FromText(Text.Trim(Text.BeforeDelimiter(Text.Range(b, 8, Text.Length(b) - 9), ","))) otherwise null
+              else null
+    in
+        Text.StartsWith(b, "FixedString")
+        or List.Contains({"UUID", "IPv6", "Int128", "UInt128", "Int256", "UInt256", "JSON", "Dynamic", "Variant"}, b)
+        or Text.StartsWith(b, "JSON(") or Text.StartsWith(b, "Dynamic(") or Text.StartsWith(b, "Variant(")
+        or Text.StartsWith(b, "AggregateFunction")
+        or (dec <> null and dec > 38);
+
 // Map a ClickHouse type string (as returned by DESCRIBE TABLE) to a Power Query M type,
 // WITH a NativeTypeName facet that matches a SqlTypeName in ClickHouseSqlGenerator's
 // SqlGetTypeInfo. SqlView.Generator uses that facet to map each column to a SQL type for
 // folding/round-tripping; without it folding fails with "Unable to understand the type".
-// Conservative mapping verified against ClickHouse 26.5; unknown/edge types fall back
-// to text/VARCHAR so a table never fails to load.
+// Verified against ClickHouse 26.5+ by value-level probes (see Tests/COVERAGE.md).
 MapClickHouseType = (chType as text) as type =>
     let
-        t0 = Text.Trim(chType),
-        // Strip one LowCardinality(...) wrapper, then detect/strip Nullable(...).
-        t1 = if Text.StartsWith(t0, "LowCardinality(") then Text.Range(t0, 15, Text.Length(t0) - 16) else t0,
-        isNullable = Text.StartsWith(t1, "Nullable("),
-        b = Text.Trim(if isNullable then Text.Range(t1, 9, Text.Length(t1) - 10) else t1),
+        unwrapped = UnwrapChType(chType),
+        isNullable = unwrapped[IsNullable],
+        b = unwrapped[Base],
         spec =
-            if Text.StartsWith(b, "Decimal") then [m = Decimal.Type, n = "DECIMAL"]
-            else if Text.StartsWith(b, "FixedString") then [m = type text, n = "VARCHAR"]
+            // UInt64 must be DECIMAL, not BIGINT: values above 2^63-1 load exactly, but a
+            // BIGINT declaration makes the engine coerce out-of-range filter literals through
+            // DOUBLE (verified: WHERE cast(v as DOUBLE) = 1.84467440737096E19 -> 0 rows,
+            // silently wrong). DECIMAL keeps literals exact end to end.
+            if b = "UInt64" then [m = Decimal.Type, n = "DECIMAL"]
+            else if Text.StartsWith(b, "Decimal") then [m = Decimal.Type, n = "DECIMAL"]
             // DateTime64 arrives as a real Arrow timestamp; plain DateTime arrives as raw
             // uint32 epoch seconds (server-side Arrow writer gap), so declaring it datetime
             // would fail the whole load — surface it as a BIGINT of epoch seconds instead.
@@ -823,7 +854,16 @@ MapClickHouseType = (chType as text) as type =>
             else if b = "Date" or b = "Date32" then [m = type date, n = "DATE"]
             else if b = "Float32" or b = "Float64" then [m = Double.Type, n = "DOUBLE"]
             else if b = "Bool" then [m = type logical, n = "BOOLEAN"]
-            else if List.Contains({"Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64"}, b) then [m = Int64.Type, n = "BIGINT"]
+            else if List.Contains({"Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32"}, b) then [m = Int64.Type, n = "BIGINT"]
+            // Enums arrive as their numeric codes over Arrow (verified: 'beta' = 2 loads as
+            // 2), and ClickHouse compares enum columns to numbers server-side, so a numeric
+            // declaration keeps values and folded filters consistent. Names need a
+            // server-side toString (Value.NativeQuery).
+            else if Text.StartsWith(b, "Enum") then
+                Diagnostics.LogValue("MapClickHouseType: " & b & " surfaced as its numeric code", [m = Int64.Type, n = "BIGINT"])
+            // IPv4 arrives as its uint32 value (verified: '1.2.3.4' loads as 16909060).
+            else if b = "IPv4" then
+                Diagnostics.LogValue("MapClickHouseType: IPv4 surfaced as its numeric value", [m = Int64.Type, n = "BIGINT"])
             else Diagnostics.LogValue("MapClickHouseType: unmapped type '" & b & "' falls back to", [m = type text, n = "VARCHAR"]),
         baseType = if isNullable then type nullable (spec[m]) else spec[m]
     in
@@ -837,8 +877,17 @@ ClickHouseLeafTable = (context as record, db as text, tbl as text) as table =>
             "ClickHouseLeafTable: DESCRIBE " & db & "." & tbl,
             context[Exec]("DESCRIBE TABLE " & ChQuote(db) & "." & ChQuote(tbl), true)
         ),
-        colNames = described[name],
-        colTypes = described[type],
+        // Columns the ADBC reader cannot fetch are excluded (see IsUnsupportedChType) so the
+        // rest of the table stays loadable; the exclusion is traced with column names.
+        unsupported = Table.SelectRows(described, each IsUnsupportedChType([type])),
+        supported =
+            if Table.IsEmpty(unsupported) then described
+            else Diagnostics.LogValue(
+                "ClickHouseLeafTable: excluding unsupported column(s) from " & db & "." & tbl
+                    & ": " & Text.Combine(unsupported[name], ", "),
+                Table.SelectRows(described, each not IsUnsupportedChType([type]))),
+        colNames = supported[name],
+        colTypes = supported[type],
         fields = Record.FromList(
             List.Transform(colTypes, each [Type = MapClickHouseType(_), Optional = false]),
             colNames
