@@ -16,5 +16,6 @@ in
         nullable = Db{[Name = "nullable"]}[Data],
         datetimes = Db{[Name = "datetimes"]}[Data],
         unicode  = Db{[Name = "unicode"]}[Data],
+        exotic   = Db{[Name = "exotic"]}[Data],
         Source   = Source
     ]

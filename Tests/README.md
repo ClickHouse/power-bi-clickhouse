@@ -82,6 +82,7 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 | KnownIssues/NullableColumns | SumV / SumN / Rows / BigN | 4 / 60 / 4 / 2 |
 | KnownIssues/NullSemantics | CountWithNulls / DistinctWithNull / TableDistinct / MultiColDistinct / MemberWithNull / MemberOnlyNull / MemberPlain / MemberEmpty | 4 / 4 / 4 / 4 / 2 / 1 / 2 / 0 |
 | KnownIssues/OuterJoinNulls | Rows / NullA | 5 / 2 |
+| KnownIssues/ExoticTypes | Cols / U64 / U64Filter / En / Ip / Arr | rid,u64,en,ip,arr,str / 18446744073709551615 / 1 / 2 / 16909060 / 1,2,3 |
 | KnownIssues/PlainDateTime | Rows / DtEpoch / Dt64Text | 2 / 1709209845 / 2024-02-29 12:30:45 |
 
 ## What the suites guard
@@ -92,6 +93,11 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
   (guards against DOUBLE coercion in folded comparisons).
 - **KnownIssues/NestedAggregation** — aggregation over an aggregated subquery (the shape
   report visuals generate) must not fail on alias resolution.
+- **KnownIssues/ExoticTypes** — the type contract at the edges: UInt64 above 2^63-1 loads
+  exactly and folds exact equality (DECIMAL mapping + CAST literal — a BIGINT declaration made
+  the engine round filter literals through DOUBLE and silently return 0 rows); Enum/IPv4
+  surface as numeric representations; Arrays load as M lists; FixedString/UUID columns (which
+  crash the ADBC reader) are excluded from the table instead of failing the load.
 - **KnownIssues/NullSemantics** — folded counts, distinct counts, and membership filters over
   nullable columns must match M's null semantics (M counts nulls and treats null as a distinct
   value; plain SQL aggregates and `IN` skip them).

@@ -148,3 +148,23 @@ INSERT INTO pqtest.unicode VALUES
     (1, 'éx'),
     (2, 'ÉXAMPLE café'),
     (3, 'a🎉x');
+
+DROP TABLE IF EXISTS pqtest.exotic;
+CREATE TABLE pqtest.exotic
+(
+    rid UInt8,
+    u64 UInt64,
+    en  Enum8('alpha' = 1, 'beta' = 2),
+    ip  IPv4,
+    arr Array(Int32),
+    fs  FixedString(4),
+    uid UUID,
+    str String
+)
+ENGINE = MergeTree ORDER BY rid;
+
+-- Type-contract boundaries: u64 at 2^64-1 (above signed range), enum/IPv4 numeric
+-- representations, a structured column, and two reader-unsupported columns (fs, uid) that
+-- the connector must EXCLUDE rather than crash on.
+INSERT INTO pqtest.exotic VALUES
+    (1, 18446744073709551615, 'beta', '1.2.3.4', [1,2,3], 'ab', '61f0c404-5cb3-11e7-907b-a6006ad3dba0', 'plain');
