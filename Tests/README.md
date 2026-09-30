@@ -74,6 +74,7 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 | Folding/DistinctCountListShape | Groups / FirstDays | 10 / 3 |
 | Functions/SumPrecisionDecimal | SumDecimalPrecision | 3.5 (folds as SUM(cast(f64 as Decimal(38, 10)))) |
 | Functions/ValueAsFold | VA | 100000 (pure passthrough) |
+| Functions/PrecisionArithmetic | Op / DefaultDiv / DoubleDiv / DecimalDiv / DoubleFrom | 0.76923076923076916 ×3 / 0.7692307692 / 0.76923076923076916 |
 | Functions/NativeQuery | FirstName / FirstTotal / Rows / UniqWithSettings | name_0 / 1.25 / 2 / 10 |
 | Folding/EscapedLiterals | EqualityRows / Rid / ContainsRows | 1 / 5 / 1 |
 | Functions/TextPredicates | ContainsRows / StartsRows / EndsRows | 1 / 1 / 1 |
@@ -93,6 +94,10 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 - **KnownIssues/NullSemantics** — folded counts, distinct counts, and membership filters over
   nullable columns must match M's null semantics (M counts nulls and treats null as a distinct
   value; plain SQL aggregates and `IN` skip them).
+- **Functions/PrecisionArithmetic** — explicit M precision requests must be honored in folded
+  arithmetic: ClickHouse Decimal division keeps the dividend's scale (1 / 1.3 → 0.769), so
+  `Precision.Double` folds with DOUBLE casts (matching local M), `Precision.Decimal` widens the
+  dividend to `Decimal(38, 10)`, and `Double.From` over a Decimal column is a real conversion.
 - **KnownIssues/OuterJoinNulls** — outer merges must carry null for unmatched rows. With
   ClickHouse's default `join_use_nulls = 0` a folded outer join fills type defaults (0, ''),
   so outer-join folding is disabled until the Arrow Flight SQL interface supports

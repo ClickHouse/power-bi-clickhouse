@@ -17,7 +17,7 @@ Legend: FOLDED = generated SQL verified in system.query_log · VALUES = results 
 |---|---|---|
 | MatchInvocation / DistinctCols | GroupDistinctCount, ApproxDistinct, DistinctCountListShape | FOLDED |
 | ValueFunctions(+ArgumentsVisitor) | Arithmetic, DecimalDivision | FOLDED (int+int engine-cast quirk documented) |
-| NumericFromHelper | Functions/NumericFrom | FOLDED (pure passthrough) |
+| NumericFromHelper | Functions/NumericFrom, PrecisionArithmetic | FOLDED (Decimal operands cast to DOUBLE; floating/unknown pass through) |
 | ValueAsAndReplaceType | Functions/ValueAsFold | FOLDED (pure passthrough) |
 | MinMaxHelper | Aggregates, MinMaxDatesText | FOLDED |
 | Date helpers ×3 | DateFunctions, DateCoverage | FOLDED |
@@ -31,10 +31,10 @@ Legend: FOLDED = generated SQL verified in system.query_log · VALUES = results 
 | Table.RowCount plain + distinct (null-preserving) | FilterRangeGroupBy, GroupDistinctCount, NullSemantics | FOLDED |
 | Table.ApproximateRowCount | ApproxDistinct | FOLDED |
 | Outer joins (folding disabled: join_use_nulls = 0 breaks null semantics) | OuterJoinNulls | LOCAL by design |
-| Value.Add/Subtract/Multiply | Arithmetic | FOLDED |
-| Value.Divide | DecimalDivision | VALUES (folded form captured in comparison runs) |
+| Value.Add/Subtract/Multiply | Arithmetic | FOLDED (explicit/default precision honored) |
+| Value.Divide | DecimalDivision, PrecisionArithmetic | FOLDED (Precision.Double → DOUBLE casts; Precision.Decimal → Decimal(38,10) dividend) |
 | Value.As / ReplaceType | Functions/ValueAsFold | FOLDED (pure passthrough) |
-| Double.From / Number.From | NumericFrom | FOLDED |
+| Double.From / Number.From | NumericFrom, PrecisionArithmetic | FOLDED (real conversion on Decimal) |
 | Value.Compare | ValueCompare | FOLDED (overflow case documented, untested by design) |
 | Date parts / StartOf* / Add* | DateCoverage, DateFunctions | FOLDED |
 | Date.StartOfDay (datetime branch) | — | BLOCKED (server emits plain DateTime as Arrow uint32) |
