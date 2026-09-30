@@ -1,0 +1,4 @@
+<clickhouse>
+    <arrowflight_port>9407</arrowflight_port>
+    <arrowflight><enable_ssl>false</enable_ssl></arrowflight>
+</clickhouse>
