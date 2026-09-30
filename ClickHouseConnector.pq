@@ -470,16 +470,18 @@ ClickHouse = [
     // will be a json string containing the required parameters of your data
     // source function. These should be parsed and parsed as individual parameters
     // to the specified data source function.
+    // Optional parameters (including Implementation) are excluded from the data-source path,
+    // so the handler cannot know which transport the source uses. ValidateConnection probes
+    // Flight SQL first and falls back to the legacy transport, so credentials are validated
+    // on whichever protocol the endpoint actually speaks.
     TestConnection = (dataSourcePath) =>
         let
             json = Json.Document(dataSourcePath),
             server = json[server],
             port = json[port],
-            database = try json[database] otherwise null,
-            options = try json[options] otherwise null
-
+            database = try json[database] otherwise null
         in
-            {"ClickHouse.Database", server, port, database, options},
+            {"ClickHouse.ValidateConnection", server, port, database},
     // Set supported types of authentication
     Authentication = [
         //Windows = [],
@@ -488,6 +490,27 @@ ClickHouse = [
     SupportsEncryption = true,
     Label = Extension.LoadString("DataSourceLabel")
 ];
+
+// Credential validation for TestConnection (gateway/service refresh). The data-source path
+// carries only server+port, so the transport is probed: an authenticated Flight SQL metadata
+// call first; on a transport-level failure (the port does not speak Flight) the legacy
+// implementation is tried. Authentication failures are surfaced immediately — they prove the
+// endpoint was reached and the credential was rejected, on either transport.
+[DataSource.Kind = "ClickHouse"]
+shared ClickHouse.ValidateConnection = (server as text, port as number, optional database as text) as number =>
+    let
+        IsAuthFailure = (e as record) as logical =>
+            let msg = Text.Lower(e[Message]? ?? "")
+            in Text.Contains(msg, "unauthenticated") or Text.Contains(msg, "authentication failed"),
+        flight = try Table.RowCount(ClickHouseAdbcConnection(server, port, database, null)),
+        result =
+            if not flight[HasError] then flight[Value]
+            else if IsAuthFailure(flight[Error]) then error flight[Error]
+            else
+                let legacy = try Table.RowCount(ClickHouse.Database(server, port, database, null))
+                in if not legacy[HasError] then legacy[Value] else error legacy[Error]
+    in
+        result;
 
 // Data Source UI publishing description
 ClickHouse.Publish = [
