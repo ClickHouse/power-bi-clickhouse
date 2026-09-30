@@ -1,5 +1,5 @@
 # Executed on the Windows test machine by run-tests.sh.
-param([string]$TargetHost, [int]$Port, [string]$Label, [string]$PqTest, [string]$TestsRoot)
+param([string]$TargetHost, [int]$Port, [string]$Label, [string]$PqTest, [string]$TestsRoot, [bool]$Encrypt = $false)
 $pq = $PqTest
 Set-Location (Join-Path $TestsRoot 'Tests\Settings')
 
@@ -10,8 +10,13 @@ $src = $src -replace 'Port = \d+', ('Port = ' + $Port)
 Set-Content $paramFile $src -Encoding utf8
 
 $tpl = & $pq credential-template -e ..\..\ClickHouse.mez -q $paramFile -ak UsernamePassword
-$tpl = $tpl -replace '\$\$USERNAME\$\$', 'default' -replace '\$\$PASSWORD\$\$', 'clickhouse'
-$tpl | & $pq set-credential -e ..\..\ClickHouse.mez -q $paramFile | Out-Null
+# The connector is encrypted by default; test targets are typically plaintext dev servers,
+# so the stored credential must state the choice explicitly.
+$j = $tpl | ConvertFrom-Json
+$j.AuthenticationProperties.Username = 'default'
+$j.AuthenticationProperties.Password = 'clickhouse'
+$j.AuthenticationProperties | Add-Member -NotePropertyName EncryptConnection -NotePropertyValue $Encrypt -Force
+($j | ConvertTo-Json -Compress) | & $pq set-credential -e ..\..\ClickHouse.mez -q $paramFile | Out-Null
 
 $pass = 0; $fail = 0
 foreach ($s in Get-ChildItem *.testsettings.json | Where-Object Name -notlike '*Comparison*') {

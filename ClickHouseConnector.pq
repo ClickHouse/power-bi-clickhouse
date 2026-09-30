@@ -867,13 +867,18 @@ ClickHouseAdbcConnection = (server as text, port as number, optional database as
             EntryPoint = "FlightSqlDriverInit"
         ],
         Credential = Extension.CurrentCredential(),
+        // Honor the encryption requirement from the credential: grpc+tls with the driver's
+        // default certificate and hostname validation (system trust store). Absent an explicit
+        // choice, default to encrypted. A TLS failure surfaces as an error — the connection is
+        // never silently downgraded to plaintext.
+        Encrypt = Credential[EncryptConnection]? ?? true,
+        Scheme = if Encrypt then "grpc+tls://" else "grpc://",
         ConnectionString = [
-            // TLS (grpc+tls) is not supported yet; plaintext grpc only.
             // NB: only the uri is traced here — credentials must never be logged.
             uri = Diagnostics.LogValue(
                 "ClickHouseAdbcConnection: uri (database=" & (database ?? "<null>")
                     & ", highPrecision=" & (if highPrecision = false then "false" else "true") & ")",
-                "grpc://" & server & ":" & Text.From(port)
+                Scheme & server & ":" & Text.From(port)
             ),
             // Basic auth via the driver's username/password (AuthenticateBasicToken handshake).
             username = Credential[Username],
