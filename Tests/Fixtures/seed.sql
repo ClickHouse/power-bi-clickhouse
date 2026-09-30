@@ -133,3 +133,18 @@ INSERT INTO pqtest.datetimes VALUES
     (2, '2020-01-01 00:00:00', '2020-01-01 00:00:00.000');
 
 INSERT INTO pqtest.text VALUES (5, 'O''Brien \\ C:\\dir\\name', 'delta', NULL);
+
+DROP TABLE IF EXISTS pqtest.unicode;
+CREATE TABLE pqtest.unicode
+(
+    rid UInt8,
+    s   String
+)
+ENGINE = MergeTree ORDER BY rid;
+
+-- Multi-byte UTF-8 content: é (2 bytes), ß (2 bytes), 🎉 (4 bytes). Guards character-aware
+-- (not byte-aware) folding of position/length/left/right/lower/upper.
+INSERT INTO pqtest.unicode VALUES
+    (1, 'éx'),
+    (2, 'ÉXAMPLE café'),
+    (3, 'a🎉x');

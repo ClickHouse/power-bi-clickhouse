@@ -39,9 +39,10 @@ Legend: FOLDED = generated SQL verified in system.query_log · VALUES = results 
 | Date parts / StartOf* / Add* | DateCoverage, DateFunctions | FOLDED |
 | Date.StartOfDay (datetime branch) | — | BLOCKED (server emits plain DateTime as Arrow uint32) |
 | MapClickHouseType plain-DateTime mitigation (epoch Int64) | KnownIssues/PlainDateTime | FOLDED-adjacent (load path) |
-| Text.PositionOf (found + absent) | TextFolding | FOLDED |
+| Text.PositionOf (found + absent, character-aware) | TextFolding, TextUnicode | FOLDED (positionUTF8) |
 | Text.Contains/StartsWith/EndsWith | TextPredicates, TextFolding | FOLDED |
-| Base text (Upper/Lower/Length/Start/End/Replace) | TextFolding | FOLDED |
+| Base text (Upper/Lower/Length/Start/End/Replace) | TextFolding, TextUnicode | FOLDED (*UTF8 family; ICU-less servers fall back to local eval) |
+| Text.TrimStart / TrimEnd | — | LOCAL by design (CH trims ASCII space only; M trims all whitespace) |
 | Text.BeforeDelimiter | — | BLOCKED (engine never routes; workaround documented) |
 
 ## Override record

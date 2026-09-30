@@ -1,4 +1,4 @@
-// Bootstrap for the ADBC / Arrow Flight SQL implementation (Implementation = "2.0").
+﻿// Bootstrap for the ADBC / Arrow Flight SQL implementation (Implementation = "2.0").
 // Adjust Server/Port to your ClickHouse instance and run Tests/Fixtures/seed.sql first.
 let
     Server = "localhost",
@@ -15,5 +15,6 @@ in
         events   = Db{[Name = "events"]}[Data],
         nullable = Db{[Name = "nullable"]}[Data],
         datetimes = Db{[Name = "datetimes"]}[Data],
+        unicode  = Db{[Name = "unicode"]}[Data],
         Source   = Source
     ]

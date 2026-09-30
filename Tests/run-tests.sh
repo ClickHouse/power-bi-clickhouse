@@ -56,6 +56,8 @@ build_and_push_mez() {
   for d in Sanity Folding KnownIssues Functions; do
     scp -q "${KEYOPT[@]}" -P "$VM_SSH_PORT" "$SCRIPT_DIR/TestSuites/$d/"*.query.pq "$SCRIPT_DIR/TestSuites/$d/"*.pqout "$VM_SSH_DEST:$VM_TESTS/Tests/TestSuites/$d/" 2>/dev/null || true
   done
+  # parameter queries too (run-suites.ps1 rewrites Server/Port per target after the copy)
+  scp -q "${KEYOPT[@]}" -P "$VM_SSH_PORT" "$SCRIPT_DIR/ParameterQueries/"*.parameterquery.pq "$VM_SSH_DEST:$VM_TESTS/Tests/ParameterQueries/" 2>/dev/null || true
 }
 
 run_target() { # $1 = label, $2 = flight port

@@ -71,6 +71,7 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 | Functions/ValueCompare | Less / Equal / Greater | -1 / 0 / 1 |
 | Functions/DateCoverage | leap-day parts, period starts, add* family | 2024-02-29 row; AddY/AddM clamp to 2025-02-28 |
 | Functions/TextFolding | Upper/Lower/Len/Left/Right/Replace/PositionOf | HELLO WORLD / … / PosFound 6 / PosNotFound -1 |
+| Functions/TextUnicode | PosAccent / PosEmoji / LenAccent / LenEmoji / StartAccent / EndAccent / LowerAccent / UpperAccent | 1 / 2 / 2 / 3 / ÉX / café / éxample café / ÉX |
 | Folding/DistinctCountListShape | Groups / FirstDays | 10 / 3 |
 | Functions/SumPrecisionDecimal | SumDecimalPrecision | 3.5 (folds as SUM(cast(f64 as Decimal(38, 10)))) |
 | Functions/ValueAsFold | VA | 100000 (pure passthrough) |
@@ -94,6 +95,11 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 - **KnownIssues/NullSemantics** — folded counts, distinct counts, and membership filters over
   nullable columns must match M's null semantics (M counts nulls and treats null as a distinct
   value; plain SQL aggregates and `IN` skip them).
+- **Functions/TextUnicode** — text folding must count characters, not bytes: multi-byte
+  UTF-8 content folds via positionUTF8/lengthUTF8/leftUTF8/rightUTF8/lowerUTF8/upperUTF8
+  (byte-based position('éx', 'x') returns 2 where M returns 1). lowerUTF8/upperUTF8 need a
+  server built with ICU (all stock releases); without it the engine falls back to local
+  evaluation with correct values.
 - **Functions/PrecisionArithmetic** — explicit M precision requests must be honored in folded
   arithmetic: ClickHouse Decimal division keeps the dividend's scale (1 / 1.3 → 0.769), so
   `Precision.Double` folds with DOUBLE casts (matching local M), `Precision.Decimal` widens the
