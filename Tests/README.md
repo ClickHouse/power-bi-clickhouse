@@ -85,6 +85,13 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 | KnownIssues/ExoticTypes | Cols / U64 / U64Filter / En / Ip / Arr | rid,u64,en,ip,arr,str / 18446744073709551615 / 1 / 2 / 16909060 / 1,2,3 |
 | KnownIssues/PlainDateTime | Rows / DtEpoch / Dt64Text | 2 / 1709209845 / 2024-02-29 12:30:45 |
 
+## Connection validation tests
+
+`run-tests.sh` also runs `docker/run-connection-tests.ps1` per target — four TestConnection
+scenarios asserting the probe routing: Flight success, immediate credential-failure
+propagation (reported as a credential error, no fallback masking), legacy fallback for a
+non-Flight (HTTP) port, and a dead port reporting BOTH transport errors.
+
 ## What the suites guard
 
 - **KnownIssues/DecimalDivision** — decimal ratios must not collapse to integers

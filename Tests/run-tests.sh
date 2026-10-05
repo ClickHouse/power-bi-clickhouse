@@ -47,9 +47,17 @@ flight_port_for() {
   esac
 }
 
+http_port_for() {
+  case "$1" in
+    local) echo 8124 ;; 26.5) echo 8105 ;; 26.6) echo 8106 ;; 26.8) echo 8108 ;; latest) echo 8110 ;;
+    *) echo "unknown version $1" >&2; exit 2 ;;
+  esac
+}
+
 build_and_push_mez() {
   "$REPO_DIR/build-mez.sh" > /dev/null
   scp -q "${KEYOPT[@]}" -P "$VM_SSH_PORT" "$SCRIPT_DIR/docker/run-suites.ps1" "$VM_SSH_DEST:$VM_TESTS/run-suites.ps1"
+  scp -q "${KEYOPT[@]}" -P "$VM_SSH_PORT" "$SCRIPT_DIR/docker/run-connection-tests.ps1" "$VM_SSH_DEST:$VM_TESTS/run-connection-tests.ps1"
   scp -q "${KEYOPT[@]}" -P "$VM_SSH_PORT" "$REPO_DIR/ClickHouse.mez" "$VM_SSH_DEST:$VM_TESTS/ClickHouse.mez"
   # sync test files (queries + snapshots; the repo is the source of truth, snapshots are
   # compared, not regenerated, on CI-style runs)
@@ -64,6 +72,7 @@ run_target() { # $1 = label, $2 = flight port
   local label="$1" port="$2"
   echo "=== [$label] flight $HOST:$port"
   ssh "${SSH_OPTS[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File $VM_TESTS/run-suites.ps1 -TargetHost $HOST -Port $port -Label $label -PqTest \"$PQTEST\" -TestsRoot \"$VM_TESTS\"" 2>/dev/null
+  ssh "${SSH_OPTS[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File $VM_TESTS/run-connection-tests.ps1 -TargetHost $HOST -FlightPort $port -HttpPort $(http_port_for "$label") -Label $label -PqTest \"$PQTEST\" -TestsRoot \"$VM_TESTS\"" 2>/dev/null
 }
 
 build_and_push_mez

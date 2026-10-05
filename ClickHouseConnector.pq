@@ -493,22 +493,46 @@ ClickHouse = [
 
 // Credential validation for TestConnection (gateway/service refresh). The data-source path
 // carries only server+port, so the transport is probed: an authenticated Flight SQL metadata
-// call first; on a transport-level failure (the port does not speak Flight) the legacy
-// implementation is tried. Authentication failures are surfaced immediately — they prove the
-// endpoint was reached and the credential was rejected, on either transport.
+// call first; on a TRANSPORT-level failure the legacy implementation is tried — that fallback
+// is deliberate and required, because one validation function serves both implementations
+// (an ODBC source's port does not speak Flight, and an ODBC-only host has no ADBC driver, yet
+// both must still validate). Failures that prove the endpoint itself was reached are surfaced
+// immediately instead of falling back: authentication failures (credential rejected),
+// authorization failures (credential accepted, rights missing), and TLS/certificate failures
+// (retrying over the legacy transport cannot cure the trust problem and would mask it). When
+// both probes fail, both errors are reported so neither transport masks the other.
 [DataSource.Kind = "ClickHouse"]
 shared ClickHouse.ValidateConnection = (server as text, port as number, optional database as text) as number =>
     let
-        IsAuthFailure = (e as record) as logical =>
-            let msg = Text.Lower(e[Message]? ?? "")
-            in Text.Contains(msg, "unauthenticated") or Text.Contains(msg, "authentication failed"),
+        // Structured detection first: the host attaches the driver's ADBC status code to the
+        // error Detail (13 = UNAUTHENTICATED, 14 = UNAUTHORIZED). Message matching remains
+        // only for the classes the codes cannot discriminate: TLS/certificate failures carry
+        // the same IO status (10) as an unreachable endpoint, and ClickHouse authorization
+        // errors arrive as server-side text.
+        IsEndpointProof = (e as record) as logical =>
+            let
+                adbcStatus = try e[Detail][AdbcError][AdbcStatus] otherwise null,
+                msg = Text.Lower(e[Message]? ?? "")
+            in adbcStatus = 13 or adbcStatus = 14
+                or Text.Contains(msg, "unauthenticated")
+                or Text.Contains(msg, "authentication failed")
+                or Text.Contains(msg, "not enough privileges")
+                or Text.Contains(msg, "access_denied")
+                or Text.Contains(msg, "certificate")
+                or Text.Contains(msg, "tls handshake"),
         flight = try Table.RowCount(ClickHouseAdbcConnection(server, port, database, null)),
         result =
             if not flight[HasError] then flight[Value]
-            else if IsAuthFailure(flight[Error]) then error flight[Error]
+            else if IsEndpointProof(flight[Error]) then error flight[Error]
             else
                 let legacy = try Table.RowCount(ClickHouse.Database(server, port, database, null))
-                in if not legacy[HasError] then legacy[Value] else error legacy[Error]
+                in
+                    if not legacy[HasError] then legacy[Value]
+                    else error Error.Record(
+                        legacy[Error][Reason]? ?? "DataSource.Error",
+                        (legacy[Error][Message]? ?? "")
+                            & " (Arrow Flight SQL attempt also failed: " & (flight[Error][Message]? ?? "") & ")",
+                        legacy[Error][Detail]?)
     in
         result;
 
