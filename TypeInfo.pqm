@@ -1,4 +1,4 @@
-// TypeInfo.pqm — ClickHouse native type catalog for the ADBC / Arrow Flight SQL path.
+﻿// TypeInfo.pqm — ClickHouse native type catalog for the ADBC / Arrow Flight SQL path.
 //
 // This table is the authoritative type catalog for two consumers:
 //   1. FlightSqlAdbcConfig.pqm selects {Name, SqlType, Unsigned, ColumnSize,
@@ -26,11 +26,26 @@ let
     GetNumberLiteral = (value as number) => Number.ToText(value, null, "en-US"),
     // DECIMAL literals: the engine's default serialization appends a trailing dot
     // ("18446744073709551615."), which ClickHouse parses as Float64 — rounding large values
-    // (2^64-1 becomes 2^64) and silently mismatching exact comparisons. An explicit CAST from
-    // a string keeps the full digits as a real Decimal (scale 10, matching the generator's
-    // Decimal(38, 10) cast convention).
+    // (2^64-1 becomes 2^64) and silently mismatching exact comparisons (verified in
+    // system.query_log). Returning an explicit CAST makes the engine REJECT the literal during
+    // fold validation, so comparisons on decimal-typed constants decline folding and evaluate
+    // client-side with full M precision — correct results, never a truncated match (verified:
+    // no CAST form ever reaches the server; the filter query arrives without a WHERE). Should
+    // any engine path inline the literal anyway, the CAST is itself exact: the scale is
+    // derived from the value, and every M decimal (max 28 significant digits) fits
+    // Decimal(38, s). (M decimals never serialize in scientific notation; the guard keeps a
+    // malformed input from miscomputing the scale.)
     GetDecimalLiteral = (value as number) =>
-        "CAST('" & Number.ToText(value, null, "en-US") & "' AS Decimal(38, 10))",
+        let
+            text = Number.ToText(value, null, "en-US"),
+            dot = Text.PositionOf(text, "."),
+            scale =
+                if Text.Contains(Text.Upper(text), "E") then null
+                else if dot < 0 then 0
+                else Text.Length(text) - dot - 1
+        in
+            if scale = null then "CAST('" & text & "' AS Decimal(38, 10))"
+            else "CAST('" & text & "' AS Decimal(38, " & Text.From(scale) & "))",
     GetTimeLiteral = (value as time) => Time.ToText(value, [Format = "HH:mm:ss.FFFFFFF", Culture = "en-US"]),
     GetDateLiteral = (value as date) => Date.ToText(value, [Format = "yyyy-MM-dd", Culture = "en-US"]),
     GetDateTimeLiteral = (value as datetime) as text =>

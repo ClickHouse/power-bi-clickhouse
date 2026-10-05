@@ -168,3 +168,17 @@ ENGINE = MergeTree ORDER BY rid;
 -- the connector must EXCLUDE rather than crash on.
 INSERT INTO pqtest.exotic VALUES
     (1, 18446744073709551615, 'beta', '1.2.3.4', [1,2,3], 'ab', '61f0c404-5cb3-11e7-907b-a6006ad3dba0', 'plain');
+
+DROP TABLE IF EXISTS pqtest.decimals;
+CREATE TABLE pqtest.decimals
+(
+    rid UInt8,
+    d18 Decimal(38, 18)
+)
+ENGINE = MergeTree ORDER BY rid;
+
+-- 18 decimal digits (19 significant — beyond double precision, so the M literal is
+-- decimal-typed): a folded equality literal truncated to scale 10 would NOT match.
+INSERT INTO pqtest.decimals VALUES
+    (1, 1.123456789012345678),
+    (2, 5.5);

@@ -17,5 +17,6 @@ in
         datetimes = Db{[Name = "datetimes"]}[Data],
         unicode  = Db{[Name = "unicode"]}[Data],
         exotic   = Db{[Name = "exotic"]}[Data],
+        decimals = Db{[Name = "decimals"]}[Data],
         Source   = Source
     ]
