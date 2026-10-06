@@ -880,6 +880,9 @@ MapClickHouseType = (chType as text) as type =>
                 Diagnostics.LogValue("MapClickHouseType: plain DateTime surfaced as epoch seconds", [m = Int64.Type, n = "BIGINT"])
             else if b = "Date" or b = "Date32" then [m = type date, n = "DATE"]
             else if b = "Float32" or b = "Float64" then [m = Double.Type, n = "DOUBLE"]
+            // Known limitation: DAX "is False" filters on logical columns emit a shape the
+            // engine refuses to fold before consulting the SQL generator (see the
+            // List.Contains override), so they error in DirectQuery; "is True" folds.
             else if b = "Bool" then [m = type logical, n = "BOOLEAN"]
             else if List.Contains({"Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32"}, b) then [m = Int64.Type, n = "BIGINT"]
             // Enums arrive as their numeric codes over Arrow (verified: 'beta' = 2 loads as

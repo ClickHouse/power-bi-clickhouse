@@ -106,8 +106,7 @@ let
     zero = AdbcConstants[zero],
 
     Argument = AdbcHelpers[Argument],
-    SingleListElement = AdbcHelpers[SingleListElement],
-    InExpression = AdbcHelpers[InExpression],
+    InArrayExpression = AdbcHelpers[InArrayExpression],
     Invocation = AdbcHelpers[Invocation],
     InvocationWithType = AdbcHelpers[InvocationWithType],
     BinaryOperation = AdbcHelpers[BinaryOperation],
@@ -373,26 +372,35 @@ let
                 and ast[Function][Value] = List.Contains and GetListCount(ast[Arguments]) = 2 then
                 let
                     arg1 = ast[Arguments]{0},
+                    // Known engine limitation (verified by instrumenting every branch of this
+                    // override): DAX's boolean "is False" filter emits
+                    // List.Contains({0}, Int64.From(col)) OR col = null, and the engine
+                    // declines that lambda BEFORE consulting FunctionOverrides — this override
+                    // is never invoked, so the shape cannot be folded from the connector.
+                    // In DirectQuery that surfaces as a fold error on "is False" boolean
+                    // filters ("is True" folds via the Int64.From override).
+                    colNode = TryVisit(visitor, ast[Arguments]{1}),
+                    visitConst = (v) => TryVisit(visitor, [Kind = "Constant", Value = v]),
                     result =
-                        if arg1[Kind] = "Constant" and Type.Is(Value.Type(arg1[Value]), type list) then
+                        if arg1[Kind] = "Constant" and Type.Is(Value.Type(arg1[Value]), type list) and colNode <> null then
                             let
                                 values = arg1[Value],
                                 nonNulls = List.Select(values, each _ <> null),
                                 hasNull = GetListCount(nonNulls) < GetListCount(values),
-                                strippedAst = [Arguments = {[Kind = "Constant", Value = nonNulls], ast[Arguments]{1}}],
+                                constNodes = List.Transform(nonNulls, visitConst),
+                                allConstsOk = not List.Contains(constNodes, null),
                                 nonNullTest =
                                     if GetListCount(nonNulls) = 1
-                                    then SingleListElement(strippedAst, visitor)
-                                    else InExpression(strippedAst[Arguments], visitor),
+                                    then BinaryLogicalOperation("Equals", colNode, constNodes{0})
+                                    else BinaryLogicalOperation("In", colNode, InArrayExpression(constNodes)),
                                 // isNull(x) as a function call: operator-style nodes
                                 // (UnaryLogicalOperation) don't fold when returned from a
                                 // FunctionOverride, function invocations do.
                                 isNullTest =
-                                    InvocationWithType(
-                                        {Argument(visitor(ast[Arguments]{1}), null)},
-                                        "isNull", booleanTypeWithFacets)
+                                    InvocationWithType({Argument(colNode, null)}, "isNull", booleanTypeWithFacets)
                             in
                                 if GetListCount(values) = 0 then BinaryLogicalOperation("Equals", one, zero)
+                                else if not allConstsOk then ...
                                 else if not hasNull then nonNullTest
                                 else if GetListCount(nonNulls) = 0 then isNullTest
                                 else
