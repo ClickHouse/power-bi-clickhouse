@@ -979,15 +979,21 @@ ClickHouseAdbcConnection = (server as text, port as number, optional database as
                     & ", highPrecision=" & (if highPrecision = false then "false" else "true") & ")",
                 Scheme & server & ":" & Text.From(port)
             ),
-            // Basic auth via the driver's username/password (AuthenticateBasicToken handshake).
-            username = Credential[Username],
-            password = Credential[Password],
-            // ClickHouse hands back a bearer token / session on the AuthenticateBasicToken
-            // handshake. With pooled connections (ConnectionPoolType=2), the first query
-            // authenticates but later ones reuse the connection and fail the re-auth RPC
-            // ("Unexpected error in RPC handling (Unknown; AuthenticateBasicToken)") unless the
-            // session cookie is echoed back. Cookie middleware (off by default in the driver)
-            // keeps the pooled connection authenticated across calls.
+            // Credentials ride on EVERY call as a static Basic authorization header instead of
+            // the handshake-issued bearer token. The server's bearer tokens live in process
+            // memory with a short idle TTL, so a pause or a server restart invalidates them —
+            // and the pooled driver connection keeps presenting the dead token, forcing the
+            // user to restart Power BI. The server authenticates every call anyway, so a
+            // per-call Basic header costs nothing and survives idle time and restarts.
+            // (On servers that still push a bearer on every response the driver adopts it and
+            // behavior matches the old flow — no worse; servers with handshake-only token
+            // minting keep the Basic header for the connection's lifetime.)
+            #"adbc.flight.sql.authorization_header" =
+                "Basic " & Binary.ToText(
+                    Text.ToBinary(Credential[Username] & ":" & Credential[Password], TextEncoding.Utf8),
+                    BinaryEncoding.Base64),
+            // Cookie middleware (off by default in the driver) keeps pooled connections
+            // working with servers that use Set-Cookie session affinity; harmless otherwise.
             #"adbc.flight.sql.rpc.with_cookie_middleware" = "true",
             // Client identification, recorded in system.query_log.client_name on servers that
             // read this header; older servers ignore unknown gRPC metadata (harmless).
