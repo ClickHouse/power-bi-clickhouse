@@ -74,7 +74,7 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 | Functions/TextUnicode | PosAccent / PosEmoji / LenAccent / LenEmoji / StartAccent / EndAccent / LowerAccent / UpperAccent | 1 / 2 / 2 / 3 / ÉX / café / éxample café / ÉX |
 | Folding/DistinctCountListShape | Groups / FirstDays | 10 / 3 |
 | Functions/SumPrecisionDecimal | SumDecimalPrecision | 3.5 (folds as SUM(cast(f64 as Decimal(38, 10)))) |
-| Functions/ValueAsFold | VA | 100000 (pure passthrough) |
+| Functions/ValueAsFold | VA / BadAssertIsError | 100000 / true |
 | Functions/PrecisionArithmetic | Op / DefaultDiv / DoubleDiv / DecimalDiv / DoubleFrom | 0.76923076923076916 ×3 / 0.7692307692 / 0.76923076923076916 |
 | Functions/NativeQuery | FirstName / FirstTotal / Rows / UniqWithSettings | name_0 / 1.25 / 2 / 10 |
 | Folding/EscapedLiterals | EqualityRows / Rid / ContainsRows | 1 / 5 / 1 |
