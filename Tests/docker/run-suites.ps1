@@ -1,5 +1,5 @@
 # Executed on the Windows test machine by run-tests.sh.
-param([string]$TargetHost, [int]$Port, [string]$Label, [string]$PqTest, [string]$TestsRoot, [bool]$Encrypt = $false)
+param([string]$TargetHost, [int]$Port, [string]$Label, [string]$PqTest, [string]$TestsRoot, [string]$Encrypt = 'false')
 $pq = $PqTest
 Set-Location (Join-Path $TestsRoot 'Tests\Settings')
 
@@ -15,12 +15,22 @@ $tpl = & $pq credential-template -e ..\..\ClickHouse.mez -q $paramFile -ak Usern
 $j = $tpl | ConvertFrom-Json
 $j.AuthenticationProperties.Username = 'default'
 $j.AuthenticationProperties.Password = 'clickhouse'
-$j.AuthenticationProperties | Add-Member -NotePropertyName EncryptConnection -NotePropertyValue $Encrypt -Force
+$j.AuthenticationProperties | Add-Member -NotePropertyName EncryptConnection -NotePropertyValue ($Encrypt -eq 'true') -Force
 ($j | ConvertTo-Json -Compress) | & $pq set-credential -e ..\..\ClickHouse.mez -q $paramFile | Out-Null
 
 $pass = 0; $fail = 0
 foreach ($s in Get-ChildItem *.testsettings.json | Where-Object Name -notlike '*Comparison*') {
-    $r = & $pq compare -e ..\..\ClickHouse.mez -sf $s.Name -fomof | ConvertFrom-Json
+    # PQTest can die before emitting JSON (native crash, bad mez); PowerShell would sail on
+    # with an empty result and report a false green. Unparseable/empty output is a FAILURE.
+    $raw = & $pq compare -e ..\..\ClickHouse.mez -sf $s.Name -fomof
+    $r = $null
+    try { $r = $raw | ConvertFrom-Json -ErrorAction Stop } catch { $r = $null }
+    if (-not $r) {
+        $fail++
+        Write-Output ("  FAIL: " + $s.Name + " (no parseable PQTest output, exit=" + $LASTEXITCODE + ")")
+        if ($raw) { $t = ($raw -join ' '); Write-Output ("    raw: " + $t.Substring(0, [Math]::Min(200, $t.Length))) }
+        continue
+    }
     foreach ($t in $r) {
         if ($t.Status -eq 'Passed') { $pass++ }
         else {

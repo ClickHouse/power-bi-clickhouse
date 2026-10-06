@@ -79,10 +79,10 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 | Functions/NativeQuery | FirstName / FirstTotal / Rows / UniqWithSettings | name_0 / 1.25 / 2 / 10 |
 | Folding/EscapedLiterals | EqualityRows / Rid / ContainsRows | 1 / 5 / 1 |
 | Functions/TextPredicates | ContainsRows / StartsRows / EndsRows | 1 / 1 / 1 |
-| KnownIssues/NullableColumns | SumV / SumN / Rows / BigN | 4 / 60 / 4 / 2 |
+| KnownIssues/NullableColumns | SumV / SumN / AvgV / AvgN / CntA / DstA / CntX / AvgAllNull / Rows / BigN | 4 / 60 / 2 / 20 / 2 / 2 / 2 / null / 4 / 2 |
 | KnownIssues/NullSemantics | CountWithNulls / DistinctWithNull / TableDistinct / MultiColDistinct / MemberWithNull / MemberOnlyNull / MemberPlain / MemberEmpty | 4 / 4 / 4 / 4 / 2 / 1 / 2 / 0 |
 | KnownIssues/OuterJoinNulls | Rows / NullA | 5 / 2 |
-| KnownIssues/ExoticTypes | Cols / U64 / U64Filter / En / Ip / Arr | rid,u64,en,ip,arr,str / 18446744073709551615 / 1 / 2 / 16909060 / 1,2,3 |
+| KnownIssues/ExoticTypes | Cols / U64 / U64Filter / En / BoolFilter / BoolDax / BoolFalse / BoolSum / Ip / Arr | rid,u64,en,ip,arr,bl,str / 18446744073709551615 / 1 / 2 / 1 / 1 / 0 / 1 / 16909060 / 1,2,3 |
 | KnownIssues/PlainDateTime | Rows / DtEpoch / Dt64Text | 2 / 1709209845 / 2024-02-29 12:30:45 |
 
 ## Connection validation tests
@@ -149,7 +149,11 @@ computes the same answer locally. PQTest's `--failOnFoldingFailure` does not det
 for record-returning tests. The reliable proof is server-side: after a suite run, check
 `system.query_log` (Flight = `interface 10`) for the expected SQL fragments, e.g.
 `uniqExact("d")`, `uniq("d")`, `"id" in (`, `startsWith`, `endsWith`, `position(`,
-`case when`. All fragments listed here were verified present after the current suites.
+`case when`, and for the DAX-emitted nullable/boolean shapes: `COUNT("v")` (COUNTA wrapper),
+`uniqExact("v")` + `MAX(` over a null-indicator CASE (DISTINCTCOUNT), `avgOrNull(`,
+`toInt64("bl") = 1` (boolean filter) and `toInt64("bl")` inside a projection subquery under
+`SUM(` (boolean aggregation). All fragments listed here were verified present after the
+current suites.
 
 Known folding quirk (backlog): integer+integer computed columns fold with engine-injected
 `cast(... as DOUBLE)` on both operands (float arithmetic folds clean); values above 2^53

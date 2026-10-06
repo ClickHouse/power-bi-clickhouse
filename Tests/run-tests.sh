@@ -25,7 +25,8 @@ KEYOPT=(); [ -n "$VM_SSH_KEY" ] && KEYOPT=(-i "$VM_SSH_KEY")
 SSH_OPTS=("${KEYOPT[@]}" -p "$VM_SSH_PORT" "$VM_SSH_DEST")
 : "${VM_TESTS:?set VM_TESTS (Windows path of the test workspace) in Tests/run-tests.env}"
 : "${PQTEST:?set PQTEST (Windows path of PQTest.exe) in Tests/run-tests.env}"
-HOST="${CH_HOST:?set CH_HOST (ClickHouse host as seen from the Windows machine) in Tests/run-tests.env}"
+# CH_HOST may come from the env file OR the --host flag; validated after argument parsing.
+HOST="${CH_HOST:-}"
 
 MODE=""; VERSIONS=""; KEEP=0
 while [ $# -gt 0 ]; do
@@ -39,6 +40,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -n "$MODE" ] || { echo "need --local or --versions"; exit 2; }
+[ -n "$HOST" ] || { echo "set CH_HOST in Tests/run-tests.env or pass --host" >&2; exit 2; }
 
 flight_port_for() {
   case "$1" in
@@ -66,19 +68,23 @@ build_and_push_mez() {
   done
   # parameter queries too (run-suites.ps1 rewrites Server/Port per target after the copy)
   scp -q "${KEYOPT[@]}" -P "$VM_SSH_PORT" "$SCRIPT_DIR/ParameterQueries/"*.parameterquery.pq "$VM_SSH_DEST:$VM_TESTS/Tests/ParameterQueries/" 2>/dev/null || true
+  # and the suite settings files (strict: a failed sync must not silently run stale settings)
+  scp -q "${KEYOPT[@]}" -P "$VM_SSH_PORT" "$SCRIPT_DIR/Settings/"*.testsettings.json "$VM_SSH_DEST:$VM_TESTS/Tests/Settings/"
 }
 
-run_target() { # $1 = label, $2 = flight port
-  local label="$1" port="$2"
-  echo "=== [$label] flight $HOST:$port"
-  ssh "${SSH_OPTS[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File $VM_TESTS/run-suites.ps1 -TargetHost $HOST -Port $port -Label $label -PqTest \"$PQTEST\" -TestsRoot \"$VM_TESTS\"" 2>/dev/null
-  ssh "${SSH_OPTS[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File $VM_TESTS/run-connection-tests.ps1 -TargetHost $HOST -FlightPort $port -HttpPort $(http_port_for "$label") -Label $label -PqTest \"$PQTEST\" -TestsRoot \"$VM_TESTS\"" 2>/dev/null
+run_target() { # $1 = label, $2 = flight port, $3 = encrypt (true/false)
+  local label="$1" port="$2" enc="${3:-false}" rc=0
+  echo "=== [$label] flight $HOST:$port (encrypt=$enc)"
+  ssh "${SSH_OPTS[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File $VM_TESTS/run-suites.ps1 -TargetHost $HOST -Port $port -Label $label -PqTest \"$PQTEST\" -TestsRoot \"$VM_TESTS\" -Encrypt $enc" 2>/dev/null || rc=1
+  ssh "${SSH_OPTS[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File $VM_TESTS/run-connection-tests.ps1 -TargetHost $HOST -FlightPort $port -HttpPort $(http_port_for "$label") -Label $label -PqTest \"$PQTEST\" -TestsRoot \"$VM_TESTS\" -FlightEncrypt $enc" 2>/dev/null || rc=1
+  return $rc
 }
 
 build_and_push_mez
 
 if [ "$MODE" = local ]; then
-  run_target "local" 9007
+  # the local dev server runs Arrow Flight behind TLS (test CA trusted on the VM)
+  run_target "local" 9007 true
 else
   [ "$VERSIONS" = all ] && VERSIONS="26.5 26.6 26.8 latest"
   cd "$SCRIPT_DIR/docker"
