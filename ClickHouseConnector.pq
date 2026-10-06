@@ -1,10 +1,10 @@
-// This connector provides a sample Direct Query enabled connector
-// based on an ODBC driver. It is meant as a template for other
-// ODBC based connectors that require similar functionality.
+// DirectQuery-enabled ClickHouse connector with two implementations selected via the
+// options record: "1.0" (default) uses the ClickHouse ODBC driver over HTTP(S);
+// "2.0" uses ADBC over Arrow Flight SQL (gRPC, TLS by default).
 //
-[Version = "0.1.5"]
+[Version = "0.2.0"]
 section ClickHouse;
-ConnectorVersion = "0.1.5";
+ConnectorVersion = "0.2.0";
 
 // When set to true, additional trace information will be written out to the User log.
 // This should be set to false before release. Tracing is done through a call to
@@ -133,25 +133,28 @@ DatabaseType = type function (
     ]),
      port as (type number meta [
         Documentation.FieldCaption = "Port",
-        Documentation.FieldDescription = "Port used by ClickHouse",
-        Documentation.SampleValues = {443, 8123, 8443}  
+        Documentation.FieldDescription = "Port used by ClickHouse: the HTTP(S) port for the default ODBC implementation, or the server's configured arrowflight_port for Implementation ""2.0"" (Arrow Flight SQL)",
+        Documentation.SampleValues = {443, 8123, 8443, 9005}
     ]),
     optional database as (type text meta [
         Documentation.FieldCaption = "Database",
         Documentation.FieldDescription = "Name of ClickHouse database",
-        Documentation.SampleValues = {"default"}  
-    ]),    
-    optional options as (type text meta [
+        Documentation.SampleValues = {"default"}
+    ]),
+    optional options as (type any meta [
         Documentation.FieldCaption = "Options",
-        Documentation.FieldDescription = "Additional connection string options separated by semicolon",
-        Documentation.SampleValues = {"Timeout=600;UseUnicode=true","UseUnicode=true"}
+        Documentation.FieldDescription = "Either ODBC connection-string options separated by semicolons, or an options record. Record options include Implementation (""1.0"" = ODBC, default; ""2.0"" = ADBC over Arrow Flight SQL) and, for ""2.0"", HighPrecision (default true: ClickHouse Decimal stays exact in aggregates; false: downcast to double)",
+        Documentation.SampleValues = {"Timeout=600;UseUnicode=true","[Implementation = ""2.0""]"}
     ]))
     as table meta [
         Documentation.Name = "ClickHouse",
-        Documentation.LongDescription = "ClickHouse ODBC connector for Power Query",
+        Documentation.LongDescription = "Connects to a ClickHouse server and returns a foldable navigation table. Two implementations are available: the default (""1.0"") uses the ClickHouse ODBC driver over HTTP(S); Implementation ""2.0"" uses ADBC over Arrow Flight SQL (gRPC, encrypted by default) and requires a ClickHouse server with the Arrow Flight SQL interface enabled (arrowflight_port) and Power BI Desktop 2.155 or later. Known limitations of the Flight SQL path: plain DateTime columns surface as Int64 epoch seconds (use DateTime64), outer merges are evaluated by Power Query rather than folded, and per-connection server settings are not yet supported.",
          Documentation.Examples = {[
             Description = "Returns a navigation table with list of play.clickhouse.com tables, that can be folded",
             Code = "ClickHouse.Database(""https://play.clickhouse.com"")"
+        ],[
+            Description = "Connects over Arrow Flight SQL (ADBC) to the server's arrowflight_port",
+            Code = "ClickHouse.Database(""my-server"", 9005, null, [Implementation = ""2.0""])"
         ]}
     ];
 
