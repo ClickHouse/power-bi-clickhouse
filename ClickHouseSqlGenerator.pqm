@@ -261,19 +261,40 @@ let
                 else ...
         else ...,
 
-    // Value.As / Value.ReplaceType fold as a passthrough when the asserted type is `any` or the
-    // expression already satisfies it. DAX-generated DirectQuery queries wrap expressions in
-    // these type assertions constantly (plain Power Query steps rarely do) — without this
-    // override, every DAX measure fails with "We couldn't fold the expression".
-    ValueAsAndReplaceType = (visitor, ast) =>
+    // Value.As / Value.ReplaceType: DAX-generated DirectQuery queries wrap expressions in
+    // these type assertions constantly (plain Power Query steps rarely do) — without the
+    // overrides below, every DAX measure fails with "We couldn't fold the expression".
+    //
+    // Shared guard: folding either operation is only a no-op when the target type is
+    // STATICALLY guaranteed — the target is literally `any` (note the argument order:
+    // Type.Is(type any, t) tests "t is any"; Type.Is(t, type any) is true for EVERY t), or
+    // the folded expression's type already satisfies the nullable target. Anything else
+    // declines the fold so the engine evaluates locally.
+    StaticallySatisfies = (arg1, arg2) =>
+        Type.Is(type any, arg2) or (Type.Is(arg1[Type], arg2) and Type.IsNullable(arg2)),
+
+    // Value.As asserts a type and FAILS at runtime on a non-conforming value; passing through
+    // when the assertion is statically guaranteed preserves that failure behavior (the decline
+    // path hands non-guaranteed assertions back to the engine).
+    ValueAsHelper = (visitor, ast) =>
         if GetListCount(ast[Arguments]) = 2 then
             let
                 arg1 = visitor(ast[Arguments]{0}),
                 arg2 = ast[Arguments]{1}[Value]
             in
-                if (Type.Is(arg2, type any)) or (Type.Is(arg1[Type], arg2) and Type.IsNullable(arg2))
-                then arg1
-                else ...
+                if StaticallySatisfies(arg1, arg2) then arg1 else ...
+        else ...,
+
+    // Value.ReplaceType swaps type metadata without validating values. SQL expressions carry
+    // no metadata to swap, so a passthrough is sound only under the same static guarantee —
+    // a replacement that would CHANGE the type the engine reads back must not fold.
+    ValueReplaceTypeHelper = (visitor, ast) =>
+        if GetListCount(ast[Arguments]) = 2 then
+            let
+                arg1 = visitor(ast[Arguments]{0}),
+                arg2 = ast[Arguments]{1}[Value]
+            in
+                if StaticallySatisfies(arg1, arg2) then arg1 else ...
         else ...,
 
     MinMaxHelper = (foldedArg, functionName) =>
@@ -426,8 +447,8 @@ let
         Value.Divide = (visitor, rowType, groupKeys, ast) => ValueFunctions(visitor, ast, "Divide"),
         Value.Subtract = (visitor, rowType, groupKeys, ast) => ValueFunctions(visitor, ast, "Subtract"),
 
-        Value.As = (visitor, rowType, groupKeys, ast) => ValueAsAndReplaceType(visitor, ast),
-        Value.ReplaceType = (visitor, rowType, groupKeys, ast) => ValueAsAndReplaceType(visitor, ast),
+        Value.As = (visitor, rowType, groupKeys, ast) => ValueAsHelper(visitor, ast),
+        Value.ReplaceType = (visitor, rowType, groupKeys, ast) => ValueReplaceTypeHelper(visitor, ast),
 
         // The DAX DirectQuery layer wraps row-level arithmetic operands in Double.From(...)
         // (DAX math is double-based). Without this override every DAX measure doing row-level
