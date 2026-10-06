@@ -54,6 +54,15 @@ let
     // characters; the backslash must be replaced first.
     GetStringLiteral = (value as text) as text =>
         "'" & Text.Replace(Text.Replace(value, "\", "\\"), "'", "\'") & "'",
+    // BOOLEAN literals arrive as M logicals (true/false) from user predicates AND as numbers
+    // (0/1) from the engine's own predicate wrapping (the "= 1" in folded boolean
+    // expressions) — verified: a logical-only signature breaks every folded text/membership
+    // predicate. EXHAUSTIVE: anything that is not exactly true/false/1/0 raises (a loud fold
+    // failure beats silently rendering the wrong predicate).
+    GetLogicalLiteral = (value) as text =>
+        if value = true or value = 1 then "1"
+        else if value = false or value = 0 then "0"
+        else error Error.Record("Expression.Error", "Not a boolean literal", value),
     TypeInfo = Table.FromRecords(
         {
             [
@@ -62,7 +71,7 @@ let
                 Type = Logical.Type,
                 Unsigned = false,
                 ColumnSize = 1,
-                GetLiteral = GetNumberLiteral,
+                GetLiteral = GetLogicalLiteral,
                 Searchable = 2,
                 NumberPrecisionRadix = null,
                 LiteralPrefix = null,

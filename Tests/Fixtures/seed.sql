@@ -157,6 +157,7 @@ CREATE TABLE pqtest.exotic
     en  Enum8('alpha' = 1, 'beta' = 2),
     ip  IPv4,
     arr Array(Int32),
+    bl  Bool,
     fs  FixedString(4),
     uid UUID,
     str String
@@ -167,7 +168,7 @@ ENGINE = MergeTree ORDER BY rid;
 -- representations, a structured column, and two reader-unsupported columns (fs, uid) that
 -- the connector must EXCLUDE rather than crash on.
 INSERT INTO pqtest.exotic VALUES
-    (1, 18446744073709551615, 'beta', '1.2.3.4', [1,2,3], 'ab', '61f0c404-5cb3-11e7-907b-a6006ad3dba0', 'plain');
+    (1, 18446744073709551615, 'beta', '1.2.3.4', [1,2,3], true, 'ab', '61f0c404-5cb3-11e7-907b-a6006ad3dba0', 'plain');
 
 DROP TABLE IF EXISTS pqtest.decimals;
 CREATE TABLE pqtest.decimals

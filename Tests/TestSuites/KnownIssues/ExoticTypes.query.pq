@@ -1,4 +1,4 @@
-﻿// Type contract at the edges (all behaviors verified against the live reader):
+// Type contract at the edges (all behaviors verified against the live reader):
 // - UInt64 above 2^63-1 loads exactly and equality on the max value returns the right row:
 //   the DECIMAL declaration + CAST literal writer make the engine DECLINE folding such
 //   comparisons (evaluated client-side, exact) instead of folding them through DOUBLE and
@@ -18,6 +18,12 @@ in
         U64 = Text.From(b[u64]),
         U64Filter = Table.RowCount(Table.Buffer(Table.SelectRows(t, each [u64] = 18446744073709551615))),
         En = b[en],
+        BoolFilter = Table.RowCount(Table.Buffer(Table.SelectRows(t, each [bl] = true))),
+        // the exact shape DAX emits for a boolean filter (folds via toInt64("bl") = 1)
+        BoolDax = Table.RowCount(Table.Buffer(Table.SelectRows(t, (r) => Value.NullableEquals(Int64.From(r[bl]), 1)))),
+        BoolFalse = Table.RowCount(Table.Buffer(Table.SelectRows(t, each [bl] = false))),
+        // Int64.From in PROJECTION/aggregation context must be a real conversion
+        BoolSum = Table.Buffer(Table.Group(Table.AddColumn(t, "b2", each Int64.From([bl]), Int64.Type), {}, {{"s", each List.Sum([b2]), Int64.Type}})){0}[s],
         Ip = b[ip],
         Arr = Text.Combine(List.Transform(b[arr], Text.From), ",")
     ]

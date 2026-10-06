@@ -133,6 +133,19 @@ let
 
     GetListCount = (listvalue) => if listvalue = null then 0 else List.Count(listvalue),
 
+    // visitor() THROWS a folding failure on arguments it cannot fold as scalar expressions
+    // (e.g. the List.Select null-stripping wrapper DAX puts around nullable aggregate
+    // columns). Inside an override that throw is fatal in DirectQuery; caught, the override
+    // can bail with `...` and the engine's own folding handles the shape natively (verified:
+    // AVG/SUM over the wrapper fold to a `where not x is null` subquery). Returns null when
+    // the argument cannot be folded.
+    TryVisit = (visitor, node) =>
+        let v = try visitor(node)
+        in if not v[HasError] then v[Value]
+           else Diagnostics.Trace(TraceLevel.Information,
+                "ClickHouseSqlGenerator: fold declined, visitor error: " & (v[Error][Message]? ?? ""),
+                null),
+
     // --- Null-preserving aggregate shapes (M counts nulls; SQL aggregates skip them) ---------
     // M List.Count counts nulls: COUNT(assumeNotNull(x)) counts every row regardless of nulls.
     NullSafeCount = (expr) =>
@@ -218,8 +231,8 @@ let
         if GetListCount(ast[Arguments]) = 2 or GetListCount(ast[Arguments]) = 3
         then
             let
-                value1 = visitor(ast[Arguments]{0}),
-                value2 = visitor(ast[Arguments]{1}),
+                value1 = TryVisit(visitor, ast[Arguments]{0}),
+                value2 = TryVisit(visitor, ast[Arguments]{1}),
                 // Defensive: the 3rd (precision) arg is normally a Constant; if the host passes
                 // anything else, [Value] would THROW inside the override and kill the fold.
                 // A missing precision means Precision.Double in M (verified against local
@@ -240,6 +253,23 @@ let
                 BinaryOperation(firstArg, operation, secondArg)
         else ...,
 
+    IntFromLogicalHelper = (visitor, ast, chFunc) =>
+        if GetListCount(ast[Arguments]) = 1
+        then
+            let
+                arg = TryVisit(visitor, ast[Arguments]{0}),
+                resultType = if arg <> null and Type.IsNullable(arg[Type])
+                    then Type.ReplaceFacets(type nullable Int64.Type, [NativeTypeName = "BIGINT"])
+                    else integerTypeWithFacets
+            in
+                // A real conversion invocation (toInt64("bl")), not a metadata re-type: the
+                // re-typed bare column surfaces Arrow Bool values where the schema promises
+                // integers in projection/aggregation contexts. Nullability is preserved.
+                if arg <> null and Type.Is(arg[Type], type nullable logical)
+                then InvocationWithType({Argument(arg, null)}, chFunc, resultType)
+                else ...
+        else ...,
+
     // Double.From / Number.From on an already-numeric argument. See the override comment below.
     // A Double.From over a known Decimal operand is a REAL conversion (ClickHouse Decimal
     // arithmetic truncates where IEEE doubles don't), so it is coerced even under
@@ -250,10 +280,11 @@ let
         if GetListCount(ast[Arguments]) = 1
         then
             let
-                arg = visitor(ast[Arguments]{0}),
+                arg = TryVisit(visitor, ast[Arguments]{0}),
                 nativeType = try Type.Facets(arg[Type])[NativeTypeName] otherwise null
             in
-                if Type.Is(arg[Type], type number) or Type.Is(arg[Type], type nullable number)
+                if arg = null then ...
+                else if Type.Is(arg[Type], type number) or Type.Is(arg[Type], type nullable number)
                 then
                     if PreserveDecimal
                     then (if nativeType = "DECIMAL" then CastSqlExpression(arg, doubleTypeWithFacets) else arg)
@@ -279,10 +310,10 @@ let
     ValueAsHelper = (visitor, ast) =>
         if GetListCount(ast[Arguments]) = 2 then
             let
-                arg1 = visitor(ast[Arguments]{0}),
+                arg1 = TryVisit(visitor, ast[Arguments]{0}),
                 arg2 = ast[Arguments]{1}[Value]
             in
-                if StaticallySatisfies(arg1, arg2) then arg1 else ...
+                if arg1 <> null and StaticallySatisfies(arg1, arg2) then arg1 else ...
         else ...,
 
     // Value.ReplaceType swaps type metadata without validating values. SQL expressions carry
@@ -291,10 +322,10 @@ let
     ValueReplaceTypeHelper = (visitor, ast) =>
         if GetListCount(ast[Arguments]) = 2 then
             let
-                arg1 = visitor(ast[Arguments]{0}),
+                arg1 = TryVisit(visitor, ast[Arguments]{0}),
                 arg2 = ast[Arguments]{1}[Value]
             in
-                if StaticallySatisfies(arg1, arg2) then arg1 else ...
+                if arg1 <> null and StaticallySatisfies(arg1, arg2) then arg1 else ...
         else ...,
 
     MinMaxHelper = (foldedArg, functionName) =>
@@ -317,16 +348,19 @@ let
             else ...,
     DateAddHelper = (visitor, ast, chFunc) =>
         let
-            arg = visitor(ast[Arguments]{0}),
-            n = visitor(ast[Arguments]{1}),
-            rt = if Type.Is(arg[Type], type nullable datetime) then datetimeTypeWithFacets
+            arg = TryVisit(visitor, ast[Arguments]{0}),
+            n = TryVisit(visitor, ast[Arguments]{1}),
+            rt = if arg = null or n = null then null
+                 else if Type.Is(arg[Type], type nullable datetime) then datetimeTypeWithFacets
                  else if Type.Is(arg[Type], type nullable date) then dateTypeWithFacets
                  else null
         in
             if rt <> null then InvocationWithType({Argument(arg, null), Argument(n, null)}, chFunc, rt)
             else ...,
     DatePartHelper = (visitor, ast, chFunc) =>
-        InvocationWithType({Argument(visitor(ast[Arguments]{0}), null)}, chFunc, integerTypeWithFacets),
+        let arg = TryVisit(visitor, ast[Arguments]{0})
+        in if arg = null then ...
+           else InvocationWithType({Argument(arg, null)}, chFunc, integerTypeWithFacets),
 
     // --- Aggregate + arithmetic FunctionOverrides (CH-safe ANSI SQL) -------------------------
     FunctionOverrides = [
@@ -374,36 +408,43 @@ let
             if GetListCount(ast[Arguments]) = 1 or GetListCount(ast[Arguments]) = 2
             then
                 let
-                    value1 = visitor(ast[Arguments]{0}),
+                    value1 = TryVisit(visitor, ast[Arguments]{0}),
                     value2 = if GetListCount(ast[Arguments]) = 2 then (try ast[Arguments]{1}[Value] otherwise null) else null,
                     firstArg = ValueFunctionsArgumentsVisitor(value1, value2)
                 in
-                    InvocationWithType({Argument(firstArg, null)}, "SUM", firstArg[Type])
+                    if value1 = null then ...
+                    else InvocationWithType({Argument(firstArg, null)}, "SUM", firstArg[Type])
             else ...,
 
         List.Average = (visitor, rowType, groupKeys, ast) =>
             let
-                foldedArg = visitor(ast[Arguments]{0})
+                foldedArg = TryVisit(visitor, ast[Arguments]{0})
             in
-                if GetListCount(ast[Arguments]) = 1 and groupKeys <> null and Type.Is(foldedArg[Type], type number)
-                // ClickHouse avg always returns Float64 (verified incl. Decimal inputs); the plain
+                if foldedArg = null then ... else
+                // Nullable accepted for consistency with the other helpers (the engine
+                // normalizes nullability on aggregate args — verified: AVG folds on
+                // Nullable(Float64)/Nullable(Int64) columns either way).
+                if GetListCount(ast[Arguments]) = 1 and groupKeys <> null and Type.Is(foldedArg[Type], type nullable number)
+                // avgOrNull, not AVG: over an all-NULL (or empty) group ClickHouse avg
+                // returns NaN where M's List.Average returns null; avgOrNull returns NULL.
+                // ClickHouse avg returns Float64 (verified incl. Decimal inputs); the plain
                 // Invocation helper would stamp a default Int64 type on the node.
-                then InvocationWithType({Argument(foldedArg, null)}, "AVG", doubleTypeWithFacets)
+                then InvocationWithType({Argument(foldedArg, null)}, "avgOrNull", doubleTypeWithFacets)
                 else ...,
 
         List.Max = (visitor, rowType, groupKeys, ast) =>
             let
-                foldedArg = visitor(ast[Arguments]{0})
+                foldedArg = TryVisit(visitor, ast[Arguments]{0})
             in
-                if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
+                if foldedArg <> null and GetListCount(ast[Arguments]) = 1 and groupKeys <> null
                 then MinMaxHelper(foldedArg, "MAX")
                 else ...,
 
         List.Min = (visitor, rowType, groupKeys, ast) =>
             let
-                foldedArg = visitor(ast[Arguments]{0})
+                foldedArg = TryVisit(visitor, ast[Arguments]{0})
             in
-                if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
+                if foldedArg <> null and GetListCount(ast[Arguments]) = 1 and groupKeys <> null
                 then MinMaxHelper(foldedArg, "MIN")
                 else ...,
 
@@ -412,10 +453,46 @@ let
         List.Count = (visitor, rowType, groupKeys, ast) =>
             if GetListCount(ast[Arguments]) = 1 and groupKeys <> null
             then
-                let ld = MatchInvocation(ast[Arguments]{0}, List.Distinct, 1) in
-                    if ld <> null
-                    then NullSafeDistinctCount("uniqExact", visitor(ld{0}))
-                    else NullSafeCount(visitor(ast[Arguments]{0}))
+                let
+                    ld = MatchInvocation(ast[Arguments]{0}, List.Distinct, 1),
+                    // DAX COUNTA / AVERAGE emit List.Count(List.Select(col, each _ <> null)).
+                    // The wrapper's predicate is carried as a real function value in the AST,
+                    // so it is validated SEMANTICALLY by sampling (false on null, true on
+                    // arbitrary non-null values proves it is the null-strip filter and nothing
+                    // else). The shape then folds to plain COUNT(col), whose SQL null-skipping
+                    // IS the requested non-null count. Anything unrecognized declines safely.
+                    // STRUCTURAL validation of the null-strip wrapper: the predicate's row
+                    // expression must be exactly `<row> <> null` (either operand order; the
+                    // bare row compiles to a zero-argument invocation). Sampling the function
+                    // was rejected in review — a compound predicate can pass any finite sample
+                    // set, and sampling executes foreign code at fold time. Anything that is
+                    // not the exact shape declines.
+                    IsNotNullStrip = (node) =>
+                        let inv = MatchInvocation(node, List.Select, 2),
+                            lam = if inv = null then null else (try inv{1}[Value] otherwise null),
+                            rx = if lam = null then null else (try RowExpression.From(lam) otherwise null),
+                            isBareRow = (n) => (try n[Kind] = "Invocation" and GetListCount(n[Arguments]) = 0 otherwise false),
+                            isNullConst = (n) => (try n[Kind] = "Constant" and n[Value] = null otherwise false),
+                            ok = rx <> null and (try
+                                rx[Kind] = "Binary" and rx[Operator] = "NotEquals"
+                                    and ((isBareRow(rx[Left]) and isNullConst(rx[Right]))
+                                        or (isBareRow(rx[Right]) and isNullConst(rx[Left])))
+                                otherwise false)
+                        in if ok then inv{0} else null,
+                    sel = IsNotNullStrip(ast[Arguments]{0}),
+                    selFolded = if sel = null then null else TryVisit(visitor, sel),
+                    // DAX DISTINCTCOUNT: List.Count(List.Distinct(List.Select(col, <> null)))
+                    // (+ a separate engine-built null indicator). uniqExact already skips
+                    // nulls, which is exactly the non-null distinct count requested.
+                    ldSel = if ld = null then null else IsNotNullStrip(ld{0}),
+                    ldSelFolded = if ldSel = null then null else TryVisit(visitor, ldSel),
+                    folded = if ld <> null then TryVisit(visitor, ld{0}) else TryVisit(visitor, ast[Arguments]{0})
+                in
+                    if ldSelFolded <> null then InvocationWithType({Argument(ldSelFolded, null)}, "uniqExact", integerTypeWithFacets)
+                    else if selFolded <> null then InvocationWithType({Argument(selFolded, null)}, "COUNT", integerTypeWithFacets)
+                    else if folded = null then ...
+                    else if ld <> null then NullSafeDistinctCount("uniqExact", folded)
+                    else NullSafeCount(folded)
             else ...,
 
         // Row count: arg is the group's sub-table, not a column. uniqExact(cols) when it's
@@ -459,15 +536,25 @@ let
         Double.From = (visitor, rowType, groupKeys, ast) => NumericFromHelper(visitor, ast),
         Number.From = (visitor, rowType, groupKeys, ast) => NumericFromHelper(visitor, ast),
 
+        // DAX compares boolean columns as Value.NullableEquals(Int64.From(col), 1). ClickHouse
+        // Bool is numerically 0/1, so Int*.From over a logical column folds as the column
+        // itself re-typed integer ("bl" = 1 is valid ClickHouse). Non-logical arguments
+        // decline — integer conversion semantics (rounding) are not a passthrough.
+        Int64.From = (visitor, rowType, groupKeys, ast) => IntFromLogicalHelper(visitor, ast, "toInt64"),
+        Int32.From = (visitor, rowType, groupKeys, ast) => IntFromLogicalHelper(visitor, ast, "toInt32"),
+        Int16.From = (visitor, rowType, groupKeys, ast) => IntFromLogicalHelper(visitor, ast, "toInt16"),
+        Int8.From = (visitor, rowType, groupKeys, ast) => IntFromLogicalHelper(visitor, ast, "toInt8"),
+
         // Comparison, not subtraction: SIGN(a - b) overflows at Int64 boundaries (ClickHouse
         // wraps) and loses precision when coerced through DOUBLE — distinct large values could
         // compare equal. A searched CASE over </> is exact for every numeric type.
         Value.Compare = (visitor, rowType, groupKeys, ast) =>
             if GetListCount(ast[Arguments]) = 2 then
                 let
-                    a = visitor(ast[Arguments]{0}),
-                    b = visitor(ast[Arguments]{1})
+                    a = TryVisit(visitor, ast[Arguments]{0}),
+                    b = TryVisit(visitor, ast[Arguments]{1})
                 in
+                    if a = null or b = null then ... else
                     CaseFunction(
                         {
                             WhenItem(BinaryLogicalOperation("LessThan", a, b), Literal("-1"), integerTypeWithFacets),
@@ -534,11 +621,12 @@ let
             if GetListCount(ast[Arguments]) = 2
             then
                 let
-                    str = Argument(visitor(ast[Arguments]{0}), textTypeWithFacets),
-                    needle = Argument(visitor(ast[Arguments]{1}), textTypeWithFacets),
-                    pos = InvocationWithType({str, needle}, "positionUTF8", integerTypeWithFacets)
+                    strV = TryVisit(visitor, ast[Arguments]{0}),
+                    needleV = TryVisit(visitor, ast[Arguments]{1}),
+                    pos = InvocationWithType({Argument(strV, textTypeWithFacets), Argument(needleV, textTypeWithFacets)}, "positionUTF8", integerTypeWithFacets)
                 in
-                    BinaryOperation(pos, "Subtract", Literal("1"))
+                    if strV = null or needleV = null then ...
+                    else BinaryOperation(pos, "Subtract", Literal("1"))
             else ...,
 
         // Base Sql92 folds Text.Contains/StartsWith/EndsWith to CONTAINS/StartsWith/EndsWith,
@@ -548,11 +636,12 @@ let
             if GetListCount(ast[Arguments]) = 2
             then
                 let
-                    str = Argument(visitor(ast[Arguments]{0}), textTypeWithFacets),
-                    needle = Argument(visitor(ast[Arguments]{1}), textTypeWithFacets),
-                    pos = InvocationWithType({str, needle}, "position", integerTypeWithFacets)
+                    strV = TryVisit(visitor, ast[Arguments]{0}),
+                    needleV = TryVisit(visitor, ast[Arguments]{1}),
+                    pos = InvocationWithType({Argument(strV, textTypeWithFacets), Argument(needleV, textTypeWithFacets)}, "position", integerTypeWithFacets)
                 in
-                    BinaryLogicalOperation("GreaterThan", pos, Literal("0"))
+                    if strV = null or needleV = null then ...
+                    else BinaryLogicalOperation("GreaterThan", pos, Literal("0"))
             else ...,
 
         Text.StartsWith = [Name = "startsWith", Type = Logical.Type],
@@ -568,11 +657,12 @@ let
             if GetListCount(ast[Arguments]) = 2
             then
                 let
-                    str = Argument(visitor(ast[Arguments]{0}), textTypeWithFacets),
-                    delim = Argument(visitor(ast[Arguments]{1}), textTypeWithFacets),
+                    strV = TryVisit(visitor, ast[Arguments]{0}),
+                    delimV = TryVisit(visitor, ast[Arguments]{1}),
                     cnt = Argument(Literal("1"), integerTypeWithFacets)
                 in
-                    InvocationWithType({str, delim, cnt}, "substringIndexUTF8", textTypeWithFacets)
+                    if strV = null or delimV = null then ...
+                    else InvocationWithType({Argument(strV, textTypeWithFacets), Argument(delimV, textTypeWithFacets), cnt}, "substringIndexUTF8", textTypeWithFacets)
             else ...
     ],
 
