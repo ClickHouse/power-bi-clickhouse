@@ -188,7 +188,7 @@ let
                 {
                     "SSLMode",
                     type nullable text,
-                    "Certificate verification method (used by TLS/SSL connections, ignored in Windows), one of: allow, prefer, require, use allow to enable SSL_VERIFY_PEER TLS/SSL certificate verification mode, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT is used otherwise",
+                    "ODBC: certificate verification method (allow, prefer, require). ADBC (Implementation 2.0): set to none to connect WITHOUT encryption (explicit opt-out; connections are encrypted by default)",
                     null,
                    each _ = null or _ <> null
                 },
@@ -456,7 +456,7 @@ let
         // (incl. the default "1.0") keeps the existing ODBC path. M's lazy evaluation means the
         // ODBC bindings above are not evaluated when the ADBC branch is taken.
         if ValidatedOptions[Implementation]? = "2.0" then
-            ClickHouseAdbcConnection(server, port, database, ValidatedOptions[HighPrecision]?)
+            ClickHouseAdbcConnection(server, port, database, ValidatedOptions[HighPrecision]?, ValidatedOptions[SSLMode]?)
         else
             OdbcDatasourceForSelectedDatabase;
 
@@ -956,7 +956,7 @@ ClickHouseDatabasesNav = (context as record, optional database as nullable text)
         Table.ToNavigationTable(withIsLeaf, {"Name"}, "Name", "Data", "ItemKind", "ItemName", "IsLeaf");
 
 // ADBC entry point: open the Flight SQL connection, wire up folding, return the navigation table.
-ClickHouseAdbcConnection = (server as text, port as number, optional database as text, optional highPrecision as logical) as table =>
+ClickHouseAdbcConnection = (server as text, port as number, optional database as text, optional highPrecision as logical, optional sslMode as text) as table =>
     let
         Driver = [
             Name = "FlightSqlClickHouse",
@@ -968,9 +968,24 @@ ClickHouseAdbcConnection = (server as text, port as number, optional database as
         Credential = Extension.CurrentCredential(),
         // Honor the encryption requirement from the credential: grpc+tls with the driver's
         // default certificate and hostname validation (system trust store). Absent an explicit
-        // choice, default to encrypted. A TLS failure surfaces as an error — the connection is
-        // never silently downgraded to plaintext.
-        Encrypt = Credential[EncryptConnection]? ?? true,
+        // choice, default to encrypted. The connection is never SILENTLY downgraded to
+        // plaintext. SSLMode=none in the connection options is the user-explicit opt-out
+        // (Power BI Desktop exposes no UI for the credential's EncryptConnection flag on
+        // custom connectors), but the CREDENTIAL always takes precedence: options live in the
+        // report's M text and must not be able to downgrade a credential that explicitly
+        // requires encryption — that combination raises a conflict error instead (clear the
+        // data source's permissions or disable its encryption requirement to proceed).
+        // Known limitation: TestConnection cannot see connection options (the data-source
+        // path excludes them), so gateway credential validation probes encrypted-first and
+        // fails against plaintext-only Flight endpoints configured via SSLMode=none.
+        Encrypt =
+            if sslMode = "none" then
+                (if Credential[EncryptConnection]? = true then
+                    error Error.Record("DataSource.Error",
+                        "SSLMode=none conflicts with this credential's encrypted-connection requirement. Remove the option, or clear the data source permissions and store the credential without requiring encryption.",
+                        null)
+                 else false)
+            else Credential[EncryptConnection]? ?? true,
         Scheme = if Encrypt then "grpc+tls://" else "grpc://",
         ConnectionString = [
             // NB: only the uri is traced here — credentials must never be logged.
