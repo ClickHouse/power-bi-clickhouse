@@ -35,7 +35,7 @@ Legend: FOLDED = generated SQL verified in system.query_log · VALUES = results 
 | Value.Divide | DecimalDivision, PrecisionArithmetic | FOLDED (Precision.Double → DOUBLE casts; Precision.Decimal → Decimal(38,10) dividend) |
 | Value.As / ReplaceType | Functions/ValueAsFold | FOLDED (pure passthrough) |
 | Double.From / Number.From | NumericFrom, PrecisionArithmetic | FOLDED (real conversion on Decimal) |
-| Value.Compare | ValueCompare | FOLDED (overflow case documented, untested by design) |
+| Value.Compare (searched CASE over </>) | ValueCompare | FOLDED (boundary + double-collision members; old SIGN(a-b) returned 0 for distinct values) |
 | Date parts / StartOf* / Add* | DateCoverage, DateFunctions | FOLDED |
 | Date.StartOfDay (datetime branch) | — | BLOCKED (server emits plain DateTime as Arrow uint32) |
 | MapClickHouseType plain-DateTime mitigation (epoch Int64) | KnownIssues/PlainDateTime | FOLDED-adjacent (load path) |

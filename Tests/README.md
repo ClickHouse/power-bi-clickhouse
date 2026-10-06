@@ -68,7 +68,7 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 | Folding/GroupDistinctCount | Groups / FirstDays / TotalDays | 10 / 3 / 30 |
 | Folding/ApproxDistinct | Groups / FirstDays | 10 / 3 |
 | Functions/NumericFrom | DF / NF | 100000 / 999.99 |
-| Functions/ValueCompare | Less / Equal / Greater | -1 / 0 / 1 |
+| Functions/ValueCompare | Less / Equal / Greater / BoundaryMinVsZero / BoundaryEqual / BoundaryMaxVsUMax / DoubleCollision | -1 / 0 / 1 / -1 / 0 / -1 / -1 |
 | Functions/DateCoverage | leap-day parts, period starts, add* family | 2024-02-29 row; AddY/AddM clamp to 2025-02-28 |
 | Functions/TextFolding | Upper/Lower/Len/Left/Right/Replace/PositionOf | HELLO WORLD / … / PosFound 6 / PosNotFound -1 |
 | Functions/TextUnicode | PosAccent / PosEmoji / LenAccent / LenEmoji / StartAccent / EndAccent / LowerAccent / UpperAccent | 1 / 2 / 2 / 3 / ÉX / café / éxample café / ÉX |

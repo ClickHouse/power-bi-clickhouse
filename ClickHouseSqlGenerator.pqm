@@ -114,6 +114,8 @@ let
     BinaryLogicalOperation = AdbcHelpers[BinaryLogicalOperation],
     Literal = AdbcHelpers[Literal],
     CastSqlExpression = AdbcHelpers[CastSqlExpression],
+    WhenItem = AdbcHelpers[WhenItem],
+    CaseFunction = AdbcHelpers[CaseFunction],
 
     // Native M types carrying the ClickHouse SqlTypeName facet (so emitted CASTs target a type
     // the generator knows about, matching SqlGetTypeInfo / SupportedConversions above).
@@ -436,12 +438,22 @@ let
         Double.From = (visitor, rowType, groupKeys, ast) => NumericFromHelper(visitor, ast),
         Number.From = (visitor, rowType, groupKeys, ast) => NumericFromHelper(visitor, ast),
 
+        // Comparison, not subtraction: SIGN(a - b) overflows at Int64 boundaries (ClickHouse
+        // wraps) and loses precision when coerced through DOUBLE — distinct large values could
+        // compare equal. A searched CASE over </> is exact for every numeric type.
         Value.Compare = (visitor, rowType, groupKeys, ast) =>
-            let
-                arg1minusarg2 = ValueFunctions(visitor, ast, "Subtract"),
-                addSign = InvocationWithType({Argument(arg1minusarg2, doubleTypeWithFacets)}, funcName[SIGN], integerTypeWithFacets)
-            in
-                addSign,
+            if GetListCount(ast[Arguments]) = 2 then
+                let
+                    a = visitor(ast[Arguments]{0}),
+                    b = visitor(ast[Arguments]{1})
+                in
+                    CaseFunction(
+                        {
+                            WhenItem(BinaryLogicalOperation("LessThan", a, b), Literal("-1"), integerTypeWithFacets),
+                            WhenItem(BinaryLogicalOperation("GreaterThan", a, b), Literal("1"), integerTypeWithFacets)
+                        },
+                        Literal("0"), null, integerTypeWithFacets)
+            else ...,
 
         // --- Date/time (CH-native; each emitted SQL verified to execute on CH 26.5) ---
         Date.Year = (visitor, rowType, groupKeys, ast) =>

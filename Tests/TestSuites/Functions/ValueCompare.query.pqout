@@ -1,1 +1,1 @@
-[ Less = -1, Equal = 0, Greater = 1 ] 
+[ Less = -1, Equal = 0, Greater = 1, BoundaryMinVsZero = -1, BoundaryEqual = 0, BoundaryMaxVsUMax = -1, DoubleCollision = -1 ] 

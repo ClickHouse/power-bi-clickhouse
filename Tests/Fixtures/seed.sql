@@ -173,12 +173,15 @@ DROP TABLE IF EXISTS pqtest.decimals;
 CREATE TABLE pqtest.decimals
 (
     rid UInt8,
-    d18 Decimal(38, 18)
+    d18  Decimal(38, 18),
+    d18b Decimal(38, 18)
 )
 ENGINE = MergeTree ORDER BY rid;
 
 -- 18 decimal digits (19 significant — beyond double precision, so the M literal is
 -- decimal-typed): a folded equality literal truncated to scale 10 would NOT match.
+-- d18/d18b differ only in the 18th decimal: identical after a cast to DOUBLE, so a
+-- comparison folded through double coercion would wrongly call them equal.
 INSERT INTO pqtest.decimals VALUES
-    (1, 1.123456789012345678),
-    (2, 5.5);
+    (1, 1.123456789012345678, 1.123456789012345679),
+    (2, 5.5, 5.5);
