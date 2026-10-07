@@ -145,6 +145,12 @@ DatabaseType = type function (
         Documentation.FieldCaption = "Options",
         Documentation.FieldDescription = "Either ODBC connection-string options separated by semicolons, or an options record. Record options include Implementation (""1.0"" = ODBC, default; ""2.0"" = ADBC over Arrow Flight SQL) and, for ""2.0"", HighPrecision (default true: ClickHouse Decimal stays exact in aggregates; false: downcast to double)",
         Documentation.SampleValues = {"Timeout=600;UseUnicode=true","[Implementation = ""2.0""]"}
+    ]),
+    optional implementation as (type text meta [
+        Documentation.FieldCaption = "Implementation",
+        Documentation.FieldDescription = "Connector implementation: Default (or empty) uses the ODBC implementation; 2.0 (Beta) uses ADBC over Arrow Flight SQL (requires the server's arrowflight_port)",
+        Documentation.AllowedValues = {"Default", "2.0 (Beta)"},
+        Documentation.DefaultValue = {"Default"}
     ]))
     as table meta [
         Documentation.Name = "ClickHouse",
@@ -160,7 +166,7 @@ DatabaseType = type function (
 
 
 
-DatabaseCoreImplementation = (server as text, port as number, optional database as text, optional options as any) =>
+DatabaseCoreImplementation = (server as text, port as number, optional database as text, optional options as any, optional implementation as text) =>
 let
         // Many data sources accept an optional 'options' record that allows users to change
         // default behaviors about the connection, such as connection timeout. Use this map
@@ -455,7 +461,11 @@ let
         // Dual implementation: "2.0" routes to the ADBC / Arrow Flight SQL path, anything else
         // (incl. the default "1.0") keeps the existing ODBC path. M's lazy evaluation means the
         // ODBC bindings above are not evaluated when the ADBC branch is taken.
-        if ValidatedOptions[Implementation]? = "2.0" then
+        // The dedicated parameter (rendered as a dropdown by the host) takes precedence;
+        // the Options record / semicolon string remains supported for existing callers.
+        // StartsWith: the dropdown value is labeled "2.0 (Beta)" today — reports saved with
+        // either spelling keep working when the label eventually drops the suffix.
+        if Text.StartsWith((implementation ?? ValidatedOptions[Implementation]?) ?? "", "2.0") then
             ClickHouseAdbcConnection(server, port, database, ValidatedOptions[HighPrecision]?, ValidatedOptions[SSLMode]?)
         else
             OdbcDatasourceForSelectedDatabase;
@@ -544,7 +554,9 @@ shared ClickHouse.ValidateConnection = (server as text, port as number, optional
 
 // Data Source UI publishing description
 ClickHouse.Publish = [
-    Beta = true,
+    // The connector itself is GA (the published ODBC implementation); only the optional
+    // Arrow Flight SQL implementation is beta, marked on its dropdown value.
+    Beta = false,
     Category = "Database",
     ButtonText = {Extension.LoadString("ButtonTitle"), Extension.LoadString("ButtonHelp")},
     LearnMoreUrl = "https://clickhouse.com",
