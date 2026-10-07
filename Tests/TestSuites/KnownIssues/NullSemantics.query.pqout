@@ -1,0 +1,1 @@
+[ CountWithNulls = 4, DistinctWithNull = 4, TableDistinct = 4, MultiColDistinct = 4, MemberWithNull = 2, MemberOnlyNull = 1, MemberPlain = 2, MemberEmpty = 0 ] 

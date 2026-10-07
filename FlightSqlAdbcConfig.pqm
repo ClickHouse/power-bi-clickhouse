@@ -1,0 +1,38 @@
+// FlightSqlAdbcConfig.pqm — driver descriptor for the generic Arrow Flight SQL ADBC driver
+// that Microsoft ships with Power BI (Desktop/Service/Gateway/SDK). We ship no binary; this
+// record tells the mashup engine which pre-installed driver to load and how to talk to it.
+//
+// ClickHouse specifics (verified against ClickHouse 26.5):
+//   * SupportsCatalog = false  — CommandGetCatalogs returns empty (no multi-catalog).
+//   * TableTypes               — ClickHouse reports TABLE / VIEW (and MATERIALIZED VIEW,
+//                                DICTIONARY, ...); we surface TABLE and VIEW for navigation.
+let
+    TypeInfo = Extension.LoadExpression("TypeInfo.pqm"),
+    FlightSqlAdbcConfig = [
+        Name = "FlightSqlAdbcClickHouse",
+        Folder = "FlightSQL",
+        File = "libadbc_driver_flightsql.dll",
+        DriverType = "Unmanaged",
+        // The driver exports both "FlightSqlDriverInit" and "FlightSQLDriverInit" aliases.
+        EntryPoint = "FlightSqlDriverInit",
+        IdentifierQuoteChar = """",
+        CatalogNameSeparator = ".",
+        TableTypes = "TABLE,VIEW",
+        SupportsCatalog = false,
+        SupportsSchema = true,
+        SupportedConnectionOptions = [
+            adbc.connection.catalog = false,
+            adbc.connection.db_schema = false
+        ],
+        TypeInfo = Table.SelectColumns(
+            TypeInfo,
+            {"Name", "SqlType", "Unsigned", "ColumnSize", "NumberPrecisionRadix", "LiteralPrefix", "LiteralSuffix"}
+        )
+    ],
+    Extension.LoadExpression = (name as text) =>
+        let
+            binary = Extension.Contents(name), asText = Text.FromBinary(binary)
+        in
+            Expression.Evaluate(asText, #shared)
+in
+    FlightSqlAdbcConfig

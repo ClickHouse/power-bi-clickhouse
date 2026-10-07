@@ -7,7 +7,7 @@
     <RootNamespace>MyRootNamespace</RootNamespace>
     <AssemblyName>MyAssemblyName</AssemblyName>
     <EnableUnmanagedDebugging>False</EnableUnmanagedDebugging>
-    <AllowNativeQuery>False</AllowNativeQuery>
+    <AllowNativeQuery>True</AllowNativeQuery>
     <AsAction>False</AsAction>
     <FastCombine>False</FastCombine>
     <ClearLog>False</ClearLog>
@@ -76,6 +76,18 @@
       <SubType>Content</SubType>
     </Compile>
     <Compile Include="OdbcConstants.pqm">
+      <SubType>Content</SubType>
+    </Compile>
+    <Compile Include="FlightSqlAdbcConfig.pqm">
+      <SubType>Content</SubType>
+    </Compile>
+    <Compile Include="TypeInfo.pqm">
+      <SubType>Content</SubType>
+    </Compile>
+    <Compile Include="SqlGeneratorCommon.pqm">
+      <SubType>Content</SubType>
+    </Compile>
+    <Compile Include="ClickHouseSqlGenerator.pqm">
       <SubType>Content</SubType>
     </Compile>
   </ItemGroup>
