@@ -509,9 +509,13 @@ shared ClickHouse.ValidateConnection = (server as text, port as number, optional
     let
         // Structured detection first: the host attaches the driver's ADBC status code to the
         // error Detail (13 = UNAUTHENTICATED, 14 = UNAUTHORIZED). Message matching remains
-        // only for the classes the codes cannot discriminate: TLS/certificate failures carry
-        // the same IO status (10) as an unreachable endpoint, and ClickHouse authorization
-        // errors arrive as server-side text.
+        // only for the classes the codes cannot discriminate: certificate-validation failures
+        // carry the same IO status (10) as an unreachable endpoint, and ClickHouse
+        // authorization errors arrive as server-side text. Deliberately NOT matched: a bare
+        // TLS/plaintext protocol mismatch ("first record does not look like a TLS handshake")
+        // — that is the normal signature of probing an ODBC source's HTTP port with the
+        // Flight-TLS probe and MUST fall through to the legacy transport (verified live in
+        // Desktop: matching it blocked every plaintext ODBC source from validating).
         IsEndpointProof = (e as record) as logical =>
             let
                 adbcStatus = try e[Detail][AdbcError][AdbcStatus] otherwise null,
@@ -521,8 +525,7 @@ shared ClickHouse.ValidateConnection = (server as text, port as number, optional
                 or Text.Contains(msg, "authentication failed")
                 or Text.Contains(msg, "not enough privileges")
                 or Text.Contains(msg, "access_denied")
-                or Text.Contains(msg, "certificate")
-                or Text.Contains(msg, "tls handshake"),
+                or Text.Contains(msg, "certificate"),
         flight = try Table.RowCount(ClickHouseAdbcConnection(server, port, database, null)),
         result =
             if not flight[HasError] then flight[Value]

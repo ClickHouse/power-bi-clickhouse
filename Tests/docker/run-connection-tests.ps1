@@ -45,6 +45,14 @@ SetCred 'cx_http.pq' 'clickhouse' $false
 $c = TC 'cx_http.pq'
 Assert 'http-legacy-fallback' ($c.Status -eq 'Success')
 
+# Desktop's default shape: encrypted credential against a plaintext HTTP (ODBC) port. The
+# Flight-TLS probe hits a protocol mismatch, which must fall through to the legacy transport
+# (the ODBC path does not read EncryptConnection).
+SetCred 'cx_http.pq' 'clickhouse' $true
+$c2 = TC 'cx_http.pq'
+Assert 'http-fallback-with-encrypted-credential' ($c2.Status -eq 'Success')
+SetCred 'cx_http.pq' 'clickhouse' $false
+
 SetCred 'cx_dead.pq' 'clickhouse' $false
 $d = TC 'cx_dead.pq'
 Assert 'dead-port-fails' ($d.Status -eq 'Failure')
