@@ -7,7 +7,7 @@
     <RootNamespace>MyRootNamespace</RootNamespace>
     <AssemblyName>MyAssemblyName</AssemblyName>
     <EnableUnmanagedDebugging>False</EnableUnmanagedDebugging>
-    <AllowNativeQuery>False</AllowNativeQuery>
+    <AllowNativeQuery>True</AllowNativeQuery>
     <AsAction>False</AsAction>
     <FastCombine>False</FastCombine>
     <ClearLog>False</ClearLog>
