@@ -2,9 +2,9 @@
 // options record: "1.0" (default) uses the ClickHouse ODBC driver over HTTP(S);
 // "2.0" uses ADBC over Arrow Flight SQL (gRPC, TLS by default).
 //
-[Version = "1.2.0"]
+[Version = "1.1.7"]
 section ClickHouse;
-ConnectorVersion = "1.2.0";
+ConnectorVersion = "1.1.7";
 
 // When set to true, additional trace information will be written out to the User log.
 // This should be set to false before release. Tracing is done through a call to
