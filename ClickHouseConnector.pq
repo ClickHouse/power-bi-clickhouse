@@ -118,6 +118,23 @@ Config_UseCastInsteadOfConvert = null;
 //
 Config_EnableDirectQuery = true;
 
+/****************************
+ * Auth0 OAuth Configuration
+ ****************************/
+// Auth0 Native application using Authorization Code + PKCE (no client secret,
+// since the .mez file is readable by anyone). The application's Allowed Callback
+// URLs must include OAuth_RedirectUri, and the Refresh Token grant must be enabled.
+Auth0_Domain = "dev-qota46cse144hzdp.us.auth0.com";
+Auth0_ClientId = "WK4ZqIGYbK637588J5MjYGbwABi378gJ";
+// Identifier of the Auth0 API that ClickHouse validates as the token audience.
+// Without an audience Auth0 issues an opaque access token instead of a JWT.
+Auth0_Audience = "https://app.slabko.org/";
+// offline_access is required to receive a refresh token.
+Auth0_Scope = "openid profile offline_access";
+OAuth_RedirectUri = "https://oauth.powerbi.com/views/oauthredirect.html";
+OAuth_WindowWidth = 720;
+OAuth_WindowHeight = 1024;
+
 // true, false
 [DataSource.Kind = "ClickHouse", Publish = "ClickHouse.Publish"]
 shared ClickHouse.Database = Value.ReplaceType(DatabaseCoreImplementation, DatabaseType);
@@ -245,13 +262,20 @@ let
         //
         // Handle credentials
         // Credentials are not persisted with the query and are set through a separate
-        // record field - CredentialConnectionString. The base Odbc.DataSource function
-        // will handle UsernamePassword authentication automatically, but it is explictly
-        // handled here as an example.
+        // record field - CredentialConnectionString. For OAuth, only the access token (JWT)
+        // is passed to the driver, which sends it as "Authorization: Bearer <token>".
+        // Token refresh is handled by Power Query through the Refresh function.
         //
         Credential = Extension.CurrentCredential(),
         CredentialConnectionString =
-                [UID = Credential[Username], PWD = Credential[Password]],
+            if Credential[AuthenticationKind]? = "UsernamePassword" then
+                [UID = Credential[Username], PWD = Credential[Password]]
+            else if Credential[AuthenticationKind]? = "OAuth" then
+                [AccessToken = Credential[access_token]]
+            else
+                error Error.Record(
+                    "Expression.Error", "Unhandled authentication kind: " & Text.From(Credential[AuthenticationKind]?)
+                ),
           
         //
         // Configuration options for the call to Odbc.DataSource
@@ -380,16 +404,22 @@ let
                 SqlCapabilities = SqlCapabilities,
                 SQLColumns = SQLColumns,
                 SQLGetInfo = SQLGetInfo,
-                SQLGetTypeInfo = SQLGetTypeInfo
+                SQLGetTypeInfo = SQLGetTypeInfo,
+                // Converts driver authentication failures into credential errors
+                OnError = OnOdbcError
             ]
-        ) 
+        )
         catch (e)=>
-        let
-            errorMessage = e[Message],
-            // check if the error is related to missing driver, if so add a link for installation, else raise the error as is
-            customErrorMessageToAdd = if Text.Contains(errorMessage, "doesn't correspond to an installed ODBC driver") then " Please visit the installation guide: https://github.com/ClickHouse/clickhouse-odbc." else ""
-        in 
-            error Text.Combine({errorMessage, customErrorMessageToAdd}),
+            // check if the error is related to missing driver, if so add a link for installation,
+            // else raise the error as is (so credential errors still trigger a sign-in prompt)
+            if Text.Contains(e[Message], "doesn't correspond to an installed ODBC driver") then
+                error Error.Record(
+                    e[Reason],
+                    e[Message] & " Please visit the installation guide: https://github.com/ClickHouse/clickhouse-odbc.",
+                    e[Detail]
+                )
+            else
+                error e,
         // without this filter, the user will get all databases 
        OdbcDatasourceForSelectedDatabase = Table.SelectRows(OdbcDatasource, each [Name] = database or database = null)
     in
@@ -421,7 +451,13 @@ ClickHouse = [
     // Set supported types of authentication
     Authentication = [
         //Windows = [],
-        UsernamePassword = []
+        UsernamePassword = [],
+        OAuth = [
+            StartLogin = StartLogin,
+            FinishLogin = FinishLogin,
+            Refresh = Refresh,
+            Label = Extension.LoadString("AuthenticationLabelOAuth")
+        ]
     ],
     SupportsEncryption = true,
     Label = Extension.LoadString("DataSourceLabel")
@@ -452,6 +488,100 @@ ClickHouse.Icons = [
         Extension.Contents("ClickHouseConnector64.png")
     }
 ];
+
+/****************************
+ * OAuth (Auth0) implementation
+ ****************************/
+// Authorization Code flow with PKCE. Power Query opens LoginUri in a browser window,
+// waits for a redirect to CallbackUri and passes it to FinishLogin together with Context.
+StartLogin = (resourceUrl, state, display) =>
+    let
+        // 64 chars from [0-9a-f], within the 43-128 range required by RFC 7636
+        codeVerifier = Text.Remove(Text.NewGuid() & Text.NewGuid(), "-"),
+        codeChallenge = Base64UrlEncode(
+            Crypto.CreateHash(CryptoAlgorithm.SHA256, Text.ToBinary(codeVerifier, TextEncoding.Ascii))
+        ),
+        authorizeUrl = "https://" & Auth0_Domain & "/authorize?" & Uri.BuildQueryString([
+            response_type = "code",
+            client_id = Auth0_ClientId,
+            redirect_uri = OAuth_RedirectUri,
+            scope = Auth0_Scope,
+            audience = Auth0_Audience,
+            state = state,
+            code_challenge = codeChallenge,
+            code_challenge_method = "S256"
+        ])
+    in
+        [
+            LoginUri = authorizeUrl,
+            CallbackUri = OAuth_RedirectUri,
+            WindowHeight = OAuth_WindowHeight,
+            WindowWidth = OAuth_WindowWidth,
+            Context = codeVerifier
+        ];
+
+FinishLogin = (context, callbackUri, state) =>
+    let
+        parts = Uri.Parts(callbackUri)[Query]
+    in
+        if Record.HasFields(parts, {"error"}) then
+            error Error.Record(parts[error], parts[error_description]?)
+        else
+            TokenMethod([
+                grant_type = "authorization_code",
+                code = parts[code],
+                redirect_uri = OAuth_RedirectUri,
+                code_verifier = context
+            ]);
+
+// Called by Power Query when the access token expires. If the refresh token is no longer
+// valid, a credential error makes Power BI ask the user to sign in again.
+Refresh = (resourceUrl, refresh_token) =>
+    let
+        result = TokenMethod([grant_type = "refresh_token", refresh_token = refresh_token])
+    in
+        // Auth0 returns a new refresh token only when rotation is enabled; keep the old one otherwise
+        if result[refresh_token]? = null then result & [refresh_token = refresh_token] else result;
+
+TokenMethod = (grant as record) as record =>
+    let
+        response = Web.Contents(
+            "https://" & Auth0_Domain & "/oauth/token",
+            [
+                Content = Text.ToBinary(Uri.BuildQueryString([client_id = Auth0_ClientId] & grant)),
+                Headers = [#"Content-Type" = "application/x-www-form-urlencoded", Accept = "application/json"],
+                ManualStatusHandling = {400, 401, 403}
+            ]
+        ),
+        body = try Json.Document(response) otherwise [error = "invalid_response"],
+        message = Text.From(body[error_description]? ?? body[error])
+    in
+        if body[error]? = null then
+            body
+        else if grant[grant_type] = "refresh_token" then
+            error Extension.CredentialError(Credential.AccessDenied, "Session expired, please sign in again. " & message)
+        else
+            error Error.Record(body[error], message);
+
+Base64UrlEncode = (value as binary) as text =>
+    Text.Replace(Text.Replace(Text.Remove(Binary.ToText(value, BinaryEncoding.Base64), "="), "+", "-"), "/", "_");
+
+// The driver reports a rejected token with SQLSTATE 28000 (invalid authorization specification).
+// Raising a credential error makes Power BI prompt the user to sign in again.
+OnOdbcError = (errorRecord as record) =>
+    let
+        detail = errorRecord[Detail]?,
+        odbcErrors = if detail is record then detail[OdbcErrors]? else null,
+        odbcErrorList =
+            if odbcErrors is table then Table.ToRecords(odbcErrors)
+            else if odbcErrors is list then odbcErrors
+            else {},
+        hasCredentialError = List.AnyTrue(List.Transform(odbcErrorList, each (try _[SQLState] otherwise null) = "28000"))
+    in
+        if hasCredentialError then
+            error Extension.CredentialError(Credential.AccessDenied, errorRecord[Message])
+        else
+            error errorRecord;
 
 
 ConvertOptionsStringToRecord = (optionsString as text, ValidOptionsMap as table) as record =>

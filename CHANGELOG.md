@@ -1,5 +1,13 @@
 # ClickHouse PowerBI Connector changelog
 
+## Unreleased
+
+### New features
+
+- OAuth (Auth0) authentication: users sign in through Auth0 and the access token (JWT) is passed to the ODBC driver
+  as `AccessToken`. Requires an ODBC driver version that supports `AccessToken`.
+- Authentication failures reported by the driver (SQLSTATE `28000`) now prompt the user to sign in again.
+
 ## 0.1.4-beta, 2024-01-14
 
 ### Bug fixes
