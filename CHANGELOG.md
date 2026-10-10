@@ -1,5 +1,18 @@
 # ClickHouse PowerBI Connector changelog
 
+## Unreleased
+
+### New features
+
+- ClickHouse Cloud SSO authentication: users sign in through ClickHouse Cloud (OAuth 2.0 Authorization Code + PKCE),
+  the connector exchanges the OAuth token for a ClickHouse JWT scoped to the service hostname, and the JWT is passed
+  to the ODBC driver as `AccessToken`. Requires an ODBC driver version that supports `AccessToken`.
+  The short-lived ClickHouse JWT is renewed silently by re-exchanging the OAuth token for as long as it is valid;
+  afterwards the user is asked to sign in again (or, once the client allows the Refresh Token grant, the OAuth token
+  is renewed silently as well). Sign-in always asks for credentials so a different account can be chosen.
+  Currently configured against the ClickHouse Cloud **dev** environment endpoints.
+- Authentication failures reported by the driver (SQLSTATE `28000`) now prompt the user to sign in again.
+
 ## 0.1.4-beta, 2024-01-14
 
 ### Bug fixes
