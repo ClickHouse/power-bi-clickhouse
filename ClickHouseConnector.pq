@@ -119,18 +119,27 @@ Config_UseCastInsteadOfConvert = null;
 Config_EnableDirectQuery = true;
 
 /****************************
- * Auth0 OAuth Configuration
+ * ClickHouse Cloud SSO Configuration
  ****************************/
-// Auth0 Native application using Authorization Code + PKCE (no client secret,
-// since the .mez file is readable by anyone). The application's Allowed Callback
-// URLs must include OAuth_RedirectUri, and the Refresh Token grant must be enabled.
-Auth0_Domain = "dev-qota46cse144hzdp.us.auth0.com";
-Auth0_ClientId = "WK4ZqIGYbK637588J5MjYGbwABi378gJ";
-// Identifier of the Auth0 API that ClickHouse validates as the token audience.
-// Without an audience Auth0 issues an opaque access token instead of a JWT.
-Auth0_Audience = "https://app.slabko.org/";
-// offline_access is required to receive a refresh token.
-Auth0_Scope = "openid profile offline_access";
+// ClickHouse Cloud SSO is an OAuth 2.0 Authorization Code + PKCE login against the ClickHouse Cloud
+// Auth0 tenant, followed by an exchange of the OAuth access token for a ClickHouse JWT scoped to the
+// service hostname (see ExchangeForClickHouseJwt). The OAuth client is confidential, so its secret is
+// embedded below; the .mez file is a zip readable by anyone, so the secret only protects the login
+// flow (PKCE is still required) and must not be treated as a trust boundary.
+// The application's Allowed Callback URLs must include OAuth_RedirectUri. Silent token refresh needs
+// the Refresh Token grant enabled on the client; without it users are asked to sign in again on expiry.
+// These are the DEV environment endpoints; production is a one-record swap.
+CloudSso = [
+    AuthorizeUrl = "TODO: FILL IN",
+    TokenUrl = "TODO: FILL IN ",
+    TokenExchangeUrl = "TODO: FILL IN",
+    // Auth0 connection that routes the login to ClickHouse Cloud SSO; required on /authorize.
+    Connection = "TODO: FILL IN",
+    ClientId = "TODO: FILL IN",
+    ClientSecret = "TODO: FILL IN",
+    // access:services is required by the token exchange; offline_access requests a refresh token.
+    Scope = "TODO: FILL IN"
+];
 OAuth_RedirectUri = "https://oauth.powerbi.com/views/oauthredirect.html";
 OAuth_WindowWidth = 720;
 OAuth_WindowHeight = 1024;
@@ -262,9 +271,10 @@ let
         //
         // Handle credentials
         // Credentials are not persisted with the query and are set through a separate
-        // record field - CredentialConnectionString. For OAuth, only the access token (JWT)
-        // is passed to the driver, which sends it as "Authorization: Bearer <token>".
-        // Token refresh is handled by Power Query through the Refresh function.
+        // record field - CredentialConnectionString. For OAuth (ClickHouse Cloud SSO), the stored
+        // access_token is already the ClickHouse JWT obtained by token exchange in FinishLogin/Refresh;
+        // it is passed to the driver, which sends it as "Authorization: Bearer <token>".
+        // The JWT is short-lived; Power Query calls Refresh before it expires (see ExchangeForClickHouseJwt).
         //
         Credential = Extension.CurrentCredential(),
         CredentialConnectionString =
@@ -490,23 +500,28 @@ ClickHouse.Icons = [
 ];
 
 /****************************
- * OAuth (Auth0) implementation
+ * ClickHouse Cloud SSO implementation (OAuth + token exchange)
  ****************************/
 // Authorization Code flow with PKCE. Power Query opens LoginUri in a browser window,
 // waits for a redirect to CallbackUri and passes it to FinishLogin together with Context.
+// resourceUrl is the data source path: a JSON string with the same fields TestConnection parses.
 StartLogin = (resourceUrl, state, display) =>
     let
+        hostname = HostnameFromResourceUrl(resourceUrl),
         // 64 chars from [0-9a-f], within the 43-128 range required by RFC 7636
         codeVerifier = Text.Remove(Text.NewGuid() & Text.NewGuid(), "-"),
         codeChallenge = Base64UrlEncode(
             Crypto.CreateHash(CryptoAlgorithm.SHA256, Text.ToBinary(codeVerifier, TextEncoding.Ascii))
         ),
-        authorizeUrl = "https://" & Auth0_Domain & "/authorize?" & Uri.BuildQueryString([
+        authorizeUrl = CloudSso[AuthorizeUrl] & "?" & Uri.BuildQueryString([
+            connection = CloudSso[Connection],
+            // Always ask for credentials instead of silently reusing the browser's SSO session; Auth0
+            // forwards prompt=login to the upstream ClickHouse IdP, so "Sign in as different user" works.
+            prompt = "login",
             response_type = "code",
-            client_id = Auth0_ClientId,
+            client_id = CloudSso[ClientId],
             redirect_uri = OAuth_RedirectUri,
-            scope = Auth0_Scope,
-            audience = Auth0_Audience,
+            scope = CloudSso[Scope],
             state = state,
             code_challenge = codeChallenge,
             code_challenge_method = "S256"
@@ -517,38 +532,73 @@ StartLogin = (resourceUrl, state, display) =>
             CallbackUri = OAuth_RedirectUri,
             WindowHeight = OAuth_WindowHeight,
             WindowWidth = OAuth_WindowWidth,
-            Context = codeVerifier
+            // FinishLogin does not receive resourceUrl, so the hostname travels with the verifier in Context.
+            Context = Text.FromBinary(Json.FromValue([code_verifier = codeVerifier, hostname = hostname]))
         ];
 
 FinishLogin = (context, callbackUri, state) =>
     let
+        ctx = Json.Document(context),
         parts = Uri.Parts(callbackUri)[Query]
     in
         if Record.HasFields(parts, {"error"}) then
             error Error.Record(parts[error], parts[error_description]?)
         else
-            TokenMethod([
-                grant_type = "authorization_code",
-                code = parts[code],
-                redirect_uri = OAuth_RedirectUri,
-                code_verifier = context
-            ]);
+            ExchangeForClickHouseJwt(
+                TokenMethod([
+                    grant_type = "authorization_code",
+                    code = parts[code],
+                    redirect_uri = OAuth_RedirectUri,
+                    code_verifier = ctx[code_verifier]
+                ]),
+                ctx[hostname]
+            );
 
-// Called by Power Query when the access token expires. If the refresh token is no longer
-// valid, a credential error makes Power BI ask the user to sign in again.
+// Called by Power Query when the stored ClickHouse JWT is about to expire. The refresh_token slot holds
+// the RefreshState JSON written by ExchangeForClickHouseJwt (see there), so the handler can:
+//   1. re-exchange the still-valid OAuth access token (24h) for a new ClickHouse JWT (5 min), and only
+//   2. when that token has expired (401), renew it through the Refresh Token grant if Auth0 gave us one,
+//   3. otherwise raise a credential error so Power BI asks the user to sign in again.
 Refresh = (resourceUrl, refresh_token) =>
     let
-        result = TokenMethod([grant_type = "refresh_token", refresh_token = refresh_token])
+        hostname = HostnameFromResourceUrl(resourceUrl),
+        state = try Json.Document(refresh_token) otherwise null,
+        oauthAccessToken = if state is record then state[oauth_access_token]? else null,
+        // a non-JSON value is a bare Auth0 refresh token stored by an older build
+        oauthRefreshToken = if state is record then state[oauth_refresh_token]? else refresh_token,
+        reexchange =
+            if oauthAccessToken = null then null
+            else try ExchangeForClickHouseJwt([access_token = oauthAccessToken, refresh_token = oauthRefreshToken], hostname),
+        reexchangeStatus = if reexchange <> null and reexchange[HasError] then (try reexchange[Error][Detail][Status] otherwise null) else null,
+        oauthTokenExpired = reexchange = null or reexchangeStatus = 401,
+        renewedOAuth = () =>
+            let
+                result = TokenMethod([grant_type = "refresh_token", refresh_token = oauthRefreshToken])
+            in
+                // Auth0 returns a new refresh token only when rotation is enabled; keep the old one otherwise
+                if result[refresh_token]? = null then result & [refresh_token = oauthRefreshToken] else result
     in
-        // Auth0 returns a new refresh token only when rotation is enabled; keep the old one otherwise
-        if result[refresh_token]? = null then result & [refresh_token = refresh_token] else result;
+        if not oauthTokenExpired then
+            (if reexchange[HasError] then error reexchange[Error] else reexchange[Value])
+        else if oauthRefreshToken <> null then
+            ExchangeForClickHouseJwt(renewedOAuth(), hostname)
+        else
+            error Extension.CredentialError(
+                Credential.AccessDenied, "Your ClickHouse Cloud session has expired, please sign in again."
+            );
+
+// No Logout handler: Power BI navigates its embedded browser to the returned URL and crashes the dialog if
+// the server answers 4xx, and Auth0's /v2/logout returned 400 from Power BI's WebView2 session even though it
+// returns 200 without cookies. prompt=login in StartLogin already forces a fresh credential prompt instead.
 
 TokenMethod = (grant as record) as record =>
     let
         response = Web.Contents(
-            "https://" & Auth0_Domain & "/oauth/token",
+            CloudSso[TokenUrl],
             [
-                Content = Text.ToBinary(Uri.BuildQueryString([client_id = Auth0_ClientId] & grant)),
+                Content = Text.ToBinary(Uri.BuildQueryString(
+                    [client_id = CloudSso[ClientId], client_secret = CloudSso[ClientSecret]] & grant
+                )),
                 Headers = [#"Content-Type" = "application/x-www-form-urlencoded", Accept = "application/json"],
                 ManualStatusHandling = {400, 401, 403}
             ]
@@ -563,8 +613,128 @@ TokenMethod = (grant as record) as record =>
         else
             error Error.Record(body[error], message);
 
+// Exchanges the OAuth access token for a ClickHouse JWT valid for the given service hostname and builds
+// the credential record Power Query stores:
+//   access_token  = the ClickHouse JWT handed to the ODBC driver (short-lived, currently 5 minutes)
+//   expires_in    = seconds until that JWT expires, so Power Query calls Refresh in time
+//   refresh_token = RefreshState JSON {"oauth_access_token": <24h OAuth token>, "oauth_refresh_token": <Auth0
+//                   refresh token or null>}; refresh_token is the only value Power Query hands back to Refresh.
+ExchangeForClickHouseJwt = (oauth as record, hostname as text) as record =>
+    let
+        request = () => Web.Contents(
+            CloudSso[TokenExchangeUrl],
+            [
+                Content = Json.FromValue([hostname = hostname]),
+                Headers = [
+                    Authorization = "Bearer " & oauth[access_token],
+                    #"Content-Type" = "application/json",
+                    Accept = "application/json"
+                ],
+                ManualStatusHandling = {400, 401, 403, 404, 500, 502, 503, 504},
+                // bypass Power Query's response cache so a retry really reaches the server
+                IsRetry = true
+            ]
+        ),
+        // The console API answered 500 for a token issued a second earlier while the same token worked
+        // moments later from curl, so retry 5xx a few times with a short pause before giving up.
+        response = RetryOnServerError(request, 3, #duration(0, 0, 0, 2)),
+        status = Value.Metadata(response)[Response.Status]?,
+        rawBody = try Text.FromBinary(response) otherwise "",
+        parsed = try Json.Document(response) otherwise null,
+        body = if parsed is record then parsed else [error = "invalid_response"],
+        // The name of the JWT field in the response is not documented; accept the common variants.
+        jwt = body[token]? ?? body[jwt]? ?? body[access_token]?,
+        message = Text.From(
+            body[error_description]? ?? body[message]? ?? body[error]? ?? ("HTTP " & Text.From(status ?? "?"))
+        ),
+        expiresIn = JwtSecondsToExpiry(jwt) ?? oauth[expires_in]?
+    in
+        if (status <> null and status >= 400) or jwt = null then
+            error Error.Record(
+                "TokenExchangeFailed",
+                "Could not obtain a ClickHouse token for service '" & hostname & "'. " & message
+                    & " (HTTP " & Text.From(status ?? "?") & "; OAuth token: " & DescribeOAuthToken(oauth[access_token])
+                    & "; endpoint: " & CloudSso[TokenExchangeUrl] & ")"
+                    // TODO: temporary debug aid, remove before release: exposes the raw OAuth access token
+                    & " Response body: " & Text.Start(rawBody, 500)
+                    & " OAuth access token: " & oauth[access_token],
+                [Status = status, Hostname = hostname]
+            )
+        else
+            [
+                access_token = jwt,
+                token_type = "Bearer",
+                refresh_token = Text.FromBinary(Json.FromValue([
+                    oauth_access_token = oauth[access_token],
+                    oauth_refresh_token = oauth[refresh_token]?
+                ]))
+            ] & (if expiresIn = null then [] else [expires_in = expiresIn]);
+
+// Describes the OAuth access token for diagnostics without revealing it: Auth0 issues an opaque token
+// (useless to the console API) unless an audience applies, and a JWT otherwise. Shows aud/scope claims.
+DescribeOAuthToken = (token as text) as text =>
+    let
+        segments = Text.Split(token, "."),
+        payload = Json.Document(Base64UrlDecode(segments{1})),
+        audList = if payload[aud]? is list then payload[aud] else {payload[aud]?},
+        description =
+            "JWT aud=[" & Text.Combine(List.Transform(audList, Text.From), ",") & "] scope=[" & Text.From(payload[scope]? ?? "") & "]"
+    in
+        if List.Count(segments) = 3 then
+            (try description otherwise "JWT with undecodable payload")
+        else
+            "opaque, " & Text.From(Text.Length(token)) & " chars";
+
+// Calls request() and, while the response status is 5xx and attempts remain, waits and calls it again.
+RetryOnServerError = (request as function, attempts as number, delay as duration) as binary =>
+    let
+        response = request(),
+        status = Value.Metadata(response)[Response.Status]?
+    in
+        if attempts > 1 and status <> null and status >= 500 then
+            Function.InvokeAfter(() => @RetryOnServerError(request, attempts - 1, delay), delay)
+        else
+            response;
+
+// The data source path is a JSON record of the data source function's required parameters. The token
+// exchange accepts only the bare service hostname (a trailing ":", "/", a port, a scheme or surrounding
+// whitespace all yield 403), so the Host field value is normalised here.
+HostnameFromResourceUrl = (resourceUrl as text) as text =>
+    let
+        json = try Json.Document(resourceUrl) otherwise null,
+        raw = if json is record and json[server]? <> null then Text.Trim(Text.From(json[server])) else null,
+        withoutScheme = if raw <> null and Text.Contains(raw, "://") then Text.AfterDelimiter(raw, "://") else raw,
+        withoutPath = if withoutScheme <> null then Text.BeforeDelimiter(withoutScheme, "/") else null,
+        withoutPort = if withoutPath <> null then Text.BeforeDelimiter(withoutPath, ":") else null,
+        hostname = if withoutPort <> null then Text.Lower(Text.Trim(withoutPort)) else null
+    in
+        if hostname <> null and hostname <> "" then
+            hostname
+        else
+            error Error.Record(
+                "Expression.Error", "Cannot determine the ClickHouse host from the data source path: " & resourceUrl
+            );
+
+// Seconds until the JWT's exp claim, less a safety margin, so Power Query refreshes the credential
+// before ClickHouse starts rejecting it. Returns null if the token cannot be decoded.
+JwtSecondsToExpiry = (jwt as nullable text) as nullable number =>
+    let
+        segments = Text.Split(jwt, "."),
+        payload = Json.Document(Base64UrlDecode(segments{1})),
+        nowSeconds = Duration.TotalSeconds(DateTimeZone.UtcNow() - #datetimezone(1970, 1, 1, 0, 0, 0, 0, 0)),
+        remaining = Number.RoundDown(payload[exp] - nowSeconds - 60)
+    in
+        try (if remaining > 0 then remaining else null) otherwise null;
+
 Base64UrlEncode = (value as binary) as text =>
     Text.Replace(Text.Replace(Text.Remove(Binary.ToText(value, BinaryEncoding.Base64), "="), "+", "-"), "/", "_");
+
+Base64UrlDecode = (value as text) as binary =>
+    let
+        standard = Text.Replace(Text.Replace(value, "-", "+"), "_", "/"),
+        padded = standard & Text.Repeat("=", Number.Mod(4 - Number.Mod(Text.Length(standard), 4), 4))
+    in
+        Binary.FromText(padded, BinaryEncoding.Base64);
 
 // The driver reports a rejected token with SQLSTATE 28000 (invalid authorization specification).
 // Raising a credential error makes Power BI prompt the user to sign in again.

@@ -124,7 +124,7 @@
     <value>ClickHouse</value>
   </data>
   <data name="AuthenticationLabelOAuth" xml:space="preserve">
-    <value>Auth0 (OAuth)</value>
+    <value>ClickHouse Cloud SSO</value>
   </data>
   <data name="DataSourceLabel" xml:space="preserve">
     <value>ClickHouse</value>
