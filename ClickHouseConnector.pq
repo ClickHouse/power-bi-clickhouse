@@ -1,481 +1,81 @@
-// DirectQuery-enabled ClickHouse connector with two implementations selected via the
-// options record: "1.0" (default) uses the ClickHouse ODBC driver over HTTP(S);
-// "2.0" uses ADBC over Arrow Flight SQL (gRPC, TLS by default).
-//
-[Version = "1.1.7"]
-section ClickHouse;
-ConnectorVersion = "1.1.7";
+// ClickHouse Arrow Flight connector for Power BI (Beta).
+// A dedicated, Flight-SQL-only connector: it talks to ClickHouse's Arrow Flight SQL
+// interface (arrowflight_port) through the Microsoft-distributed ADBC driver, with
+// DirectQuery folding provided by ClickHouseSqlGenerator.pqm. The classic ODBC connector
+// ("ClickHouseArrowFlight") is a separate, unchanged connector.
+[Version = "1.0.0"]
+section ClickHouseArrowFlight;
+ConnectorVersion = "1.0.0";
 
 // When set to true, additional trace information will be written out to the User log.
-// This should be set to false before release. Tracing is done through a call to
-// Diagnostics.LogValue(). When EnableTraceOutput is set to false, the call becomes a
-// no-op and simply returns the original value.
 EnableTraceOutput = false;
 
-// TODO
-// add handling for SSL
-/****************************
- * ODBC Driver Configuration
- ****************************/
-// The name of your ODBC driver.
-//
-Config_DriverNameUnicode = "ClickHouse ODBC Driver (Unicode)";
-Config_DriverNameANSI = "ClickHouse ODBC Driver (ANSI)";
-
-// If your driver under-reports its SQL conformance level because it does not
-// support the full range of CRUD operations, but does support the ANSI SQL required
-// to support the SELECT operations performed by Power Query, you can override
-// this value to report a higher conformance level. Please use one of the numeric
-// values below (i.e. 8 for SQL_SC_SQL92_FULL).
-//
-// SQL_SC =
-// [
-//     SQL_SC_SQL92_ENTRY            = 1,
-//     SQL_SC_FIPS127_2_TRANSITIONAL = 2,
-//     SQL_SC_SQL92_INTERMEDIATE     = 4,
-//     SQL_SC_SQL92_FULL             = 8
-// ]
-//
-// Set to null to determine the value from the driver.
-//
-Config_SqlConformance = ODBC[SQL_SC][SQL_SC_SQL92_FULL];
-// null, 1, 2, 4, 8
-// This setting controls row count limits and offsets. If not set correctly, query
-// folding capabilities for this connector will be extremely limited. You can use
-// the LimitClauseKind constants to match common LIMIT/OFFSET SQL formats. If none
-// of the supported formats match your desired SQL syntax, consider filing a feature
-// request to support your variation.
-//
-// Supporting OFFSET is considerably less important than supporting LIMIT.
-//
-// LimitClauseKind values and formats:
-//
-// LimitClauseKind.Top (LIMIT only, OFFSET not supported)
-// -------------------
-// SELECT TOP 100 *
-// FROM table
-//
-// LimitClauseKind.Limit (LIMIT only, OFFSET not supported)
-// ---------------------
-// SELECT *
-// FROM table
-// LIMIT 100
-//
-// LimitClauseKind.LimitOffset
-// ---------------------------
-// SELECT *
-// FROM table
-// LIMIT 100 OFFSET 200
-//
-// This option requires that the SQL dialect support all three variations:
-// "LIMIT x", "LIMIT x OFFSET y" and "OFFSET y". If your SQL dialect only supports
-// OFFSET when LIMIT is also specified, use LimitClauseKind.Limit instead.
-//
-// LimitClauseKind.AnsiSql2008
-// ---------------------------
-// SELECT *
-// FROM table
-// OFFSET 200 ROWS
-// FETCH FIRST 100 ROWS ONLY
-//
-Config_LimitClauseKind = LimitClauseKind.LimitOffset;
-// see above
-// Set this option to true if your ODBC supports the standard username/password
-// handling through the UID and PWD connection string parameters. If the user
-// selects UsernamePassword auth, the supplied values will be automatically
-// added to the CredentialConnectionString.
-//
-// If you wish to set these values yourself, or your driver requires additional
-// parameters to be set, please set this option to 'false'
-//
-Config_DefaultUsernamePasswordHandling = true;
-// true, false
-// Some drivers have problems will parameter bindings and certain data types.
-// If the driver supports parameter bindings, then set this to true.
-// When set to false, parameter values will be inlined as literals into the generated SQL.
-// To enable inlining for a limited number of data types, set this value
-// to null and set individual flags through the SqlCapabilities record.
-//
-// Set to null to determine the value from the driver.
-//
-Config_UseParameterBindings = null;
-// true, false, null
-// Override this setting to force the character escape value.
-// This is typically done when you have set UseParameterBindings to false.
-//
-// Set to null to determine the value from the driver.
-//
-Config_StringLiterateEscapeCharacters = {"\"};
-// ex. { "\" }
-// Override this if the driver expects the use of CAST instead of CONVERT.
-// By default, the query will be generated using ANSI SQL CONVERT syntax.
-//
-// Set to null to leave default behavior.
-//
-Config_UseCastInsteadOfConvert = null;
-// true, false, null
-// Set this to true to enable Direct Query in addition to Import mode.
-//
 Config_EnableDirectQuery = true;
 
-// true, false
-[DataSource.Kind = "ClickHouse", Publish = "ClickHouse.Publish"]
-shared ClickHouse.Database = Value.ReplaceType(DatabaseCoreImplementation, DatabaseType);
+[DataSource.Kind = "ClickHouseArrowFlight", Publish = "ClickHouseArrowFlight.Publish"]
+shared ClickHouseArrowFlight.Database = Value.ReplaceType(DatabaseCoreImplementation, DatabaseType);
 
-
-
-// Documanting the function
 DatabaseType = type function (
     server as (type text meta [
         Documentation.FieldCaption = "Server",
-        Documentation.FieldDescription = "Name of ClickHouse Server (name only, without prefixes",
-        Documentation.SampleValues = {"play.clickhouse.com"}
+        Documentation.FieldDescription = "ClickHouse server host name (name only, without prefixes)",
+        Documentation.SampleValues = {"my-server.clickhouse.cloud"}
     ]),
-     port as (type number meta [
+    port as (type number meta [
         Documentation.FieldCaption = "Port",
-        Documentation.FieldDescription = "Port used by ClickHouse: the HTTP(S) port for the default ODBC implementation, or the server's configured arrowflight_port for Implementation ""2.0"" (Arrow Flight SQL)",
-        Documentation.SampleValues = {443, 8123, 8443, 9005}
+        Documentation.FieldDescription = "The server's Arrow Flight SQL port (arrowflight_port)",
+        Documentation.SampleValues = {9005}
     ]),
     optional database as (type text meta [
         Documentation.FieldCaption = "Database",
         Documentation.FieldDescription = "Name of ClickHouse database",
         Documentation.SampleValues = {"default"}
     ]),
-    optional options as (type any meta [
+    optional options as (type record meta [
         Documentation.FieldCaption = "Options",
-        Documentation.FieldDescription = "Either ODBC connection-string options separated by semicolons, or an options record. Record options include Implementation (""1.0"" = ODBC, default; ""2.0"" = ADBC over Arrow Flight SQL) and, for ""2.0"", HighPrecision (default true: ClickHouse Decimal stays exact in aggregates; false: downcast to double)",
-        Documentation.SampleValues = {"Timeout=600;UseUnicode=true","[Implementation = ""2.0""]"}
-    ]),
-    optional implementation as (type text meta [
-        Documentation.FieldCaption = "Implementation",
-        Documentation.FieldDescription = "Connector implementation: Default (or empty) uses the ODBC implementation; 2.0 (Beta) uses ADBC over Arrow Flight SQL (requires the server's arrowflight_port)",
-        Documentation.AllowedValues = {"Default", "2.0 (Beta)"},
-        Documentation.DefaultValue = {"Default"}
+        Documentation.FieldDescription = "Optional record: HighPrecision (default true: ClickHouse Decimal stays exact in aggregates; false: downcast to double); SSLMode (""none"" connects WITHOUT encryption — explicit opt-out; connections are encrypted by default)"
     ]))
     as table meta [
-        Documentation.Name = "ClickHouse",
-        Documentation.LongDescription = "Connects to a ClickHouse server and returns a foldable navigation table. Two implementations are available: the default (""1.0"") uses the ClickHouse ODBC driver over HTTP(S); Implementation ""2.0"" uses ADBC over Arrow Flight SQL (gRPC, encrypted by default) and requires a ClickHouse server with the Arrow Flight SQL interface enabled (arrowflight_port) and Power BI Desktop 2.155 or later. Known limitations of the Flight SQL path: plain DateTime columns surface as Int64 epoch seconds (use DateTime64), outer merges are evaluated by Power Query rather than folded, and per-connection server settings are not yet supported.",
-         Documentation.Examples = {[
-            Description = "Returns a navigation table with list of play.clickhouse.com tables, that can be folded",
-            Code = "ClickHouse.Database(""https://play.clickhouse.com"")"
-        ],[
-            Description = "Connects over Arrow Flight SQL (ADBC) to the server's arrowflight_port",
-            Code = "ClickHouse.Database(""my-server"", 9005, null, [Implementation = ""2.0""])"
+        Documentation.Name = "ClickHouse Arrow Flight",
+        Documentation.LongDescription = "Connects to a ClickHouse server over Arrow Flight SQL (gRPC, encrypted by default) and returns a foldable navigation table. Requires a ClickHouse server with the Arrow Flight SQL interface enabled (arrowflight_port) and Power BI Desktop 2.155 or later. Known limitations: plain DateTime columns surface as Int64 epoch seconds (use DateTime64), outer merges are evaluated by Power Query rather than folded, and per-connection server settings are not yet supported.",
+        Documentation.Examples = {[
+            Description = "Connects over Arrow Flight SQL to the server's arrowflight_port",
+            Code = "ClickHouseArrowFlight.Database(""my-server"", 9005)"
         ]}
     ];
 
+ValidOptionsMap = #table(
+    {"Name", "Type", "Description", "Default", "Validate"},
+    {
+        {
+            // true (default) keeps ClickHouse Decimal columns exact in SUM/arithmetic
+            // (SUM("amount") -> Decimal); false downcasts to Float64 to match Power Query's
+            // default local-eval semantics (SUM(cast(... AS DOUBLE))).
+            "HighPrecision",
+            type nullable logical,
+            "Keep Decimal exact in aggregates/arithmetic (true, default) vs downcast to double (false)",
+            true,
+            each _ = null or _ = true or _ = false
+        },
+        {
+            // Explicit opt-out from TLS for plaintext dev servers; see the Encrypt logic in
+            // ClickHouseAdbcConnection for the credential-precedence rules.
+            "SSLMode",
+            type nullable text,
+            "Set to none to connect WITHOUT encryption (explicit opt-out; encrypted by default)",
+            null,
+            each _ = null or _ = "none"
+        }
+    }
+);
 
-
-DatabaseCoreImplementation = (server as text, port as number, optional database as text, optional options as any, optional implementation as text) =>
-let
-        // Many data sources accept an optional 'options' record that allows users to change
-        // default behaviors about the connection, such as connection timeout. Use this map
-        // to define the appropriate options for your ODBC Driver. If you do not want to support
-        // an options record, remove the ValidOptionsMap variable and options parameter from
-        // the data source function.
-        // more details regarding the driver options can be found at https://github.com/ClickHouse/clickhouse-odbc
-        ValidOptionsMap = #table(
-            {"Name", "Type", "Description", "Default", "Validate"},
-            {
-                {
-                    "Timeout",
-                    type nullable number,
-                    "Connection timeout - positive integers only",
-                    null,
-                     each _ = null or (_ >= 0 and Number.RoundDown(_) = _)
-                },
-                {
-                    "VerifyConnectionEarly",
-                    type nullable text,
-                    "Verify the connection and credentials during SQLConnect and similar calls (adds a typical overhead of one trivial remote query execution), otherwise, possible connection-related failures will be detected later, during SQLExecute and similar calls",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    "SSLMode",
-                    type nullable text,
-                    "ODBC: certificate verification method (allow, prefer, require). ADBC (Implementation 2.0): set to none to connect WITHOUT encryption (explicit opt-out; connections are encrypted by default)",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    "PrivateKeyFile",
-                    type nullable text,
-                    "Path to private key file (used by TLS/SSL connections)",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    "CertificateFile",
-                    type nullable text,
-                    "Path to certificate file (used by TLS/SSL connections, ignored in Windows), if the private key and the certificate are stored in the same file, this can be empty if PrivateKeyFile is specified",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    "CALocation",
-                    type nullable text,
-                    "Path to the file or directory containing the CA/root certificates (used by TLS/SSL connections, ignored in Windows)",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    "HugeIntAsString",
-                    type nullable text,
-                    "Report integer column types that may underflow or overflow 64-bit signed integer (SQL_BIGINT) as a String/SQL_VARCHAR",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    "DriverLog",
-                    type nullable text,
-                    "Enable or disable the extended driver logging",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    "DriverLogFile",
-                    type nullable text,
-                    "Path to the extended driver log file (used when DriverLog is on)",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    "UseANSIDriver",
-                    type nullable logical,
-                    "By default, the unicode driver is used. Set this option to true for ANSI driver",
-                    null,
-                   each _ = null or _ <> null
-                },
-                {
-                    // Selects the connector backend: "1.0" = ODBC (default, unchanged behavior),
-                    // "2.0" = ADBC over Arrow Flight SQL. See ClickHouseAdbcDataSource below.
-                    "Implementation",
-                    type nullable text,
-                    "Connector implementation: ""1.0"" for ODBC (default), ""2.0"" for ADBC Arrow Flight SQL",
-                    "1.0",
-                    each _ = null or _ = "1.0" or _ = "2.0"
-                },
-                {
-                    // ADBC path only. true (default) keeps ClickHouse Decimal columns exact in
-                    // SUM/arithmetic (SUM("amount") -> Decimal); false downcasts to Float64 to
-                    // match Power Query's default local-eval semantics (SUM(cast(... AS DOUBLE))).
-                    "HighPrecision",
-                    type nullable logical,
-                    "ADBC only: keep Decimal exact in aggregates/arithmetic (true, default) vs downcast to double (false)",
-                    true,
-                    each _ = null or _ = true or _ = false
-                }
-
-
-
-
-                // Some data sources may support setting separate timeout values for Connect and Command timeouts
-                // {"CommandTimeout", type nullable number, "non-negative integers", null, each _ = null or (_ >= 0 and Number.RoundDown(_) = _)}
-            }
-        ),
-
-        parsedOptions = if(Type.Is(Value.Type(options), type text))
-                            then ConvertOptionsStringToRecord(options, ValidOptionsMap)
-                        else if (Type.Is(Value.Type(options), type record))
-                        then options
-                        else [],
-
-        ValidatedOptions = ValidateOptions(parsedOptions, ValidOptionsMap),
-        //
-        // Connection string settings
-        //
-        ConnectionString = [
-            // At minimum you need to specify the ODBC Driver to use.
-            Driver =  if(ValidatedOptions[UseANSIDriver]?=null or not ValidatedOptions[UseANSIDriver]?) then Config_DriverNameUnicode else Config_DriverNameANSI,
-            // Specify custom properties for your ODBC Driver here.
-            // The fields below are appropriate for the SQL Server ODBC Driver. The
-            // names might be different for your data source.
-            Server = server,
-
-            Port = port ,
-            Database = database,  
-            // Identifies the implementation path server-side (system.query_log http_user_agent).
-            // The ADBC path cannot send an equivalent yet: the Flight server does not read any
-            // client-identity metadata (candidate server-side ask).
-            ClientName = "PowerBi/" & ConnectorVersion & "-odbc",
-            SQLCompatibilitySettings = 1,
-            
-            // These fields come from the options record, so they might be null.
-            // A later step will strip all null values from the connection string.
-            #"Timeout" = ValidatedOptions[Timeout]?,
-            #"VerifyConnectionEarly" = ValidatedOptions[VerifyConnectionEarly]?,
-            #"SSLMode" = ValidatedOptions[SSLMode]?,
-            #"PrivateKeyFile" = ValidatedOptions[PrivateKeyFile]?,
-            #"CertificateFile" = ValidatedOptions[CertificateFile]?,
-            #"CALocation" = ValidatedOptions[CALocation]?,
-            #"HugeIntAsString" = ValidatedOptions[HugeIntAsString]?,
-            #"DriverLog" = ValidatedOptions[DriverLog]?,
-            #"DriverLogFile" = ValidatedOptions[DriverLogFile]?
-
-        ],
-        //
-        // Handle credentials
-        // Credentials are not persisted with the query and are set through a separate
-        // record field - CredentialConnectionString. The base Odbc.DataSource function
-        // will handle UsernamePassword authentication automatically, but it is explictly
-        // handled here as an example.
-        //
-        Credential = Extension.CurrentCredential(),
-        CredentialConnectionString =
-                [UID = Credential[Username], PWD = Credential[Password]],
-          
-        //
-        // Configuration options for the call to Odbc.DataSource
-        //
-        defaultConfig = Diagnostics.LogValue("BuildOdbcConfig", BuildOdbcConfig()),
-        SqlCapabilities = Diagnostics.LogValue(
-            "SqlCapabilities_Options", defaultConfig[SqlCapabilities] & [
-                // Place custom overrides here
-                // The values below are required for the SQL Native Client ODBC driver, but might
-                // not be required for your data source.
-                FractionalSecondsScale = 3
-            ]
-        ),
-        // Please refer to the ODBC specification for SQLGetInfo properties and values.
-        // https://github.com/Microsoft/ODBC-Specification/blob/master/Windows/inc/sqlext.h
-        SQLGetInfo = Diagnostics.LogValue(
-            "SQLGetInfo_Options",
-            defaultConfig[SQLGetInfo]
-                & [
-                    // Place custom overrides here
-                    // The values below are required for the SQL Native Client ODBC driver, but might
-                    // not be required for your data source.
-                    SQL_SQL92_PREDICATES = ODBC[SQL_SP][All],
-                    SQL_AGGREGATE_FUNCTIONS = ODBC[SQL_AF][All],
-                    SQL_CONVERT_FUNCTIONS = 0x00000002 // Tell PowerBI that ClickHouse uses cast and not convert
-                ]
-        ),
-        // SQLGetTypeInfo can be specified in two ways:
-        // 1. A #table() value that returns the same type information as an ODBC
-        //    call to SQLGetTypeInfo.
-        // 2. A function that accepts a table argument, and returns a table. The
-        //    argument will contain the original results of the ODBC call to SQLGetTypeInfo.
-        //    Your function implementation can modify/add to this table.
-        //
-        // For details of the format of the types table parameter and expected return value,
-        // please see: https://docs.microsoft.com/en-us/sql/odbc/reference/syntax/sqlgettypeinfo-function
-        //
-        // The sample implementation provided here will simply output the original table
-        // to the user trace log, without any modification.
-        SQLGetTypeInfo = (types) =>
-            if (EnableTraceOutput <> true) then
-                types
-            else
-                let
-                    // Outputting the entire table might be too large, and result in the value being truncated.
-                    // We can output a row at a time instead with Table.TransformRows()
-                    rows = Table.TransformRows(types, each Diagnostics.LogValue("SQLGetTypeInfo " & _[TYPE_NAME], _)),
-                    toTable = Table.FromRecords(rows)
-                in
-                    Value.ReplaceType(toTable, Value.Type(types)),
-        // SQLColumns is a function handler that receives the results of an ODBC call
-        // to SQLColumns(). The source parameter contains a table with the data type
-        // information. This override is typically used to fix up data type mismatches
-        // between calls to SQLGetTypeInfo and SQLColumns.
-        //
-        // For details of the format of the source table parameter, please see:
-        // https://docs.microsoft.com/en-us/sql/odbc/reference/syntax/sqlcolumns-function
-        //
-        // The sample implementation provided here will simply output the original table
-        // to the user trace log, without any modification.
-        SQLColumns = (catalogName, schemaName, tableName, columnName, source) =>
-            let
-                    OdbcSqlType.BIT = -7,
-                    OdbcSqlType.BOOLEAN = 249,
-                    OdbcSqlType.SQL_GUID = -11,
-                    OdbcSqlType.UUID = 245,
-                    OdbcSqlType.SQL_TINYINT = -6,
-                    OdbcSqlType.INT8 = 250,
-                    OdbcSqlType.SQL_BIGINT = -5,
-                    OdbcSqlType.INT64 = 251,
-                    FixDataType = (dataType) =>
-                        if dataType = OdbcSqlType.BOOLEAN then
-                            OdbcSqlType.BIT
-                        else if dataType = OdbcSqlType.UUID then
-                            OdbcSqlType.SQL_GUID
-                        else if dataType = OdbcSqlType.INT8 then
-                            OdbcSqlType.SQL_TINYINT                            
-                        else if dataType = OdbcSqlType.INT64 then
-                            OdbcSqlType.SQL_BIGINT
-                        else
-                            dataType,
-                    FixDataTypeName = (dataTypeName) =>
-                        if dataTypeName = "TEXT" then
-                            "SQL_WVARCHAR"
-                        else if dataTypeName = "CHAR" then
-                            "SQL_WCHAR"
-                        else
-                            dataTypeName,
-                    Transform = Table.TransformColumns(source, {{"DATA_TYPE", FixDataType}
-//                     , {"TYPE_NAME", FixDataTypeName}
-                    })
-           in
-                    if (EnableTraceOutput <> true) then
-                        Transform
-                    else if (
-                        // the if statement conditions will force the values to evaluated/written to diagnostics
-                        Diagnostics.LogValue("SQLColumns.TableName", tableName) <> "***"
-                        and Diagnostics.LogValue("SQLColumns.ColumnName", columnName) <> "***"
-                    ) then
-                        let
-                            // Outputting the entire table might be too large, and result in the value being truncated.
-                            // We can output a row at a time instead with Table.TransformRows()
-                            rows = Table.TransformRows(Transform, each Diagnostics.LogValue("SQLColumns", _)),
-                            toTable = Table.FromRecords(rows)
-                        in
-                            Value.ReplaceType(toTable, Value.Type(Transform))
-                    else
-                        Transform,
-        // Remove null fields from the ConnectionString
-        ConnectionStringNoNulls = Record.SelectFields(
-            ConnectionString, Table.SelectRows(Record.ToTable(ConnectionString), each [Value] <> null)[Name]
-        ),
-        OdbcDatasource = Odbc.DataSource(
-            ConnectionStringNoNulls,
-            [
-                // A logical (true/false) that sets whether to view the tables grouped by their schema names
-                HierarchicalNavigation = true,
-                // Allows upconversion of numeric types
-                SoftNumbers = true,
-                // Allow upconversion / resizing of numeric and string types
-                TolerateConcatOverflow = true,
-                // Enables connection pooling via the system ODBC manager
-                ClientConnectionPooling = true,
-                // These values should be set by previous steps
-                CredentialConnectionString = CredentialConnectionString,
-                SqlCapabilities = SqlCapabilities,
-                SQLColumns = SQLColumns,
-                SQLGetInfo = SQLGetInfo,
-                SQLGetTypeInfo = SQLGetTypeInfo
-            ]
-        ),
-        // without this filter, the user will get all databases
-       OdbcDatasourceForSelectedDatabase = Table.SelectRows(OdbcDatasource, each [Name] = database or database = null)
+DatabaseCoreImplementation = (server as text, port as number, optional database as text, optional options as record) =>
+    let
+        ValidatedOptions = ValidateOptions(options, ValidOptionsMap)
     in
-        // Dual implementation: "2.0" routes to the ADBC / Arrow Flight SQL path, anything else
-        // (incl. the default "1.0") keeps the existing ODBC path. M's lazy evaluation means the
-        // ODBC bindings above are not evaluated when the ADBC branch is taken.
-        // The dedicated parameter (rendered as a dropdown by the host) takes precedence;
-        // the Options record / semicolon string remains supported for existing callers.
-        // StartsWith: the dropdown value is labeled "2.0 (Beta)" today — reports saved with
-        // either spelling keep working when the label eventually drops the suffix.
-        if Text.StartsWith((implementation ?? ValidatedOptions[Implementation]?) ?? "", "2.0") then
-            ClickHouseAdbcConnection(server, port, database, ValidatedOptions[HighPrecision]?, ValidatedOptions[SSLMode]?)
-        else
-            OdbcDatasourceForSelectedDatabase;
+        ClickHouseAdbcConnection(server, port, database, ValidatedOptions[HighPrecision]?, ValidatedOptions[SSLMode]?);
 
-
-
-// Data Source Kind description
-
-
-ClickHouse = [
+ClickHouseArrowFlight = [
     // Set the TestConnection handler to enable gateway support.
     // The TestConnection handler will invoke your data source function to
     // validate the credentials the user has provider. Ideally, this is not
@@ -483,10 +83,8 @@ ClickHouse = [
     // will be a json string containing the required parameters of your data
     // source function. These should be parsed and parsed as individual parameters
     // to the specified data source function.
-    // Optional parameters (including Implementation) are excluded from the data-source path,
-    // so the handler cannot know which transport the source uses. ValidateConnection probes
-    // Flight SQL first and falls back to the legacy transport, so credentials are validated
-    // on whichever protocol the endpoint actually speaks.
+    // Optional parameters are excluded from the data-source path; the handler validates the
+    // credential with an authenticated Flight SQL metadata call.
     TestConnection = (dataSourcePath) =>
         let
             json = Json.Document(dataSourcePath),
@@ -494,7 +92,7 @@ ClickHouse = [
             port = json[port],
             database = try json[database] otherwise null
         in
-            {"ClickHouse.ValidateConnection", server, port, database},
+            {"ClickHouseArrowFlight.ValidateConnection", server, port, database},
     // Set supported types of authentication
     Authentication = [
         //Windows = [],
@@ -504,68 +102,26 @@ ClickHouse = [
     Label = Extension.LoadString("DataSourceLabel")
 ];
 
-// Credential validation for TestConnection (gateway/service refresh). The data-source path
-// carries only server+port, so the transport is probed: an authenticated Flight SQL metadata
-// call first; on a TRANSPORT-level failure the legacy implementation is tried — that fallback
-// is deliberate and required, because one validation function serves both implementations
-// (an ODBC source's port does not speak Flight, and an ODBC-only host has no ADBC driver, yet
-// both must still validate). Failures that prove the endpoint itself was reached are surfaced
-// immediately instead of falling back: authentication failures (credential rejected),
-// authorization failures (credential accepted, rights missing), and TLS/certificate failures
-// (retrying over the legacy transport cannot cure the trust problem and would mask it). When
-// both probes fail, both errors are reported so neither transport masks the other.
-[DataSource.Kind = "ClickHouse"]
-shared ClickHouse.ValidateConnection = (server as text, port as number, optional database as text) as number =>
-    let
-        // Structured detection first: the host attaches the driver's ADBC status code to the
-        // error Detail (13 = UNAUTHENTICATED, 14 = UNAUTHORIZED). Message matching remains
-        // only for the classes the codes cannot discriminate: certificate-validation failures
-        // carry the same IO status (10) as an unreachable endpoint, and ClickHouse
-        // authorization errors arrive as server-side text. Deliberately NOT matched: a bare
-        // TLS/plaintext protocol mismatch ("first record does not look like a TLS handshake")
-        // — that is the normal signature of probing an ODBC source's HTTP port with the
-        // Flight-TLS probe and MUST fall through to the legacy transport (verified live in
-        // Desktop: matching it blocked every plaintext ODBC source from validating).
-        IsEndpointProof = (e as record) as logical =>
-            let
-                adbcStatus = try e[Detail][AdbcError][AdbcStatus] otherwise null,
-                msg = Text.Lower(e[Message]? ?? "")
-            in adbcStatus = 13 or adbcStatus = 14
-                or Text.Contains(msg, "unauthenticated")
-                or Text.Contains(msg, "authentication failed")
-                or Text.Contains(msg, "not enough privileges")
-                or Text.Contains(msg, "access_denied")
-                or Text.Contains(msg, "certificate"),
-        flight = try Table.RowCount(ClickHouseAdbcConnection(server, port, database, null)),
-        result =
-            if not flight[HasError] then flight[Value]
-            else if IsEndpointProof(flight[Error]) then error flight[Error]
-            else
-                let legacy = try Table.RowCount(ClickHouse.Database(server, port, database, null))
-                in
-                    if not legacy[HasError] then legacy[Value]
-                    else error Error.Record(
-                        legacy[Error][Reason]? ?? "DataSource.Error",
-                        (legacy[Error][Message]? ?? "")
-                            & " (Arrow Flight SQL attempt also failed: " & (flight[Error][Message]? ?? "") & ")",
-                        legacy[Error][Detail]?)
-    in
-        result;
+// Credential validation for TestConnection (gateway/service refresh). Flight-only: the probe
+// is an authenticated metadata call over Arrow Flight SQL; every failure surfaces as-is
+// (there is no second transport to fall back to in this connector).
+[DataSource.Kind = "ClickHouseArrowFlight"]
+shared ClickHouseArrowFlight.ValidateConnection = (server as text, port as number, optional database as text) as number =>
+    Table.RowCount(ClickHouseAdbcConnection(server, port, database, null, null));
 
-// Data Source UI publishing description
-ClickHouse.Publish = [
-    // The connector itself is GA (the published ODBC implementation); only the optional
-    // Arrow Flight SQL implementation is beta, marked on its dropdown value.
-    Beta = false,
+ClickHouseArrowFlight.Publish = [
+    // This connector is the Beta home of the Arrow Flight SQL implementation; the classic
+    // ODBC connector ("ClickHouse") remains the GA product.
+    Beta = true,
     Category = "Database",
     ButtonText = {Extension.LoadString("ButtonTitle"), Extension.LoadString("ButtonHelp")},
     LearnMoreUrl = "https://clickhouse.com",
     SupportsDirectQuery = Config_EnableDirectQuery,
-     SourceImage = ClickHouse.Icons,
-     SourceTypeImage = ClickHouse.Icons
+     SourceImage = ClickHouseArrowFlight.Icons,
+     SourceTypeImage = ClickHouseArrowFlight.Icons
 ];
 
-ClickHouse.Icons = [
+ClickHouseArrowFlight.Icons = [
     Icon16 = {
         Extension.Contents("ClickHouseConnector16.png"),
         Extension.Contents("ClickHouseConnector20.png"),
@@ -581,122 +137,6 @@ ClickHouse.Icons = [
 ];
 
 
-ConvertOptionsStringToRecord = (optionsString as text, ValidOptionsMap as table) as record =>
-        let
-            // Split the options string into rows (drop blanks from trailing/double ';')
-            optionRows = List.Select(Text.Split(optionsString, ";"), each Text.Trim(_) <> ""),
-
-            // Split each row into key-value pairs, trimming whitespace so "a=1; b=2" works
-            // (otherwise the key becomes " b" and fails validation).
-            keyValuePairs = List.Transform(optionRows, each List.Transform(Text.Split(_, "="), Text.Trim)),
-
-            flattenedList = List.Combine(keyValuePairs),
-
-            extractedOptionsFromMap = List.Select(ValidOptionsMap[Name], each List.Contains(keyValuePairs, {_, _})),
-            // Identify keys from optionsString that don't exist in ValidOptionsMap
-        invalidKeys = List.Difference(List.Transform(keyValuePairs, each Text.Clean(Text.Trim(_{0}))), ValidOptionsMap[Name]),
-        extractedOptionsRecord = Record.FromList(List.Alternate(flattenedList, 1, 1), List.Alternate(flattenedList, 1, 1, 1)),
-        
-
-        optionsToTransform = Table.SelectRows(ValidOptionsMap, each (not Type.Is([Type],type nullable text) and not Type.Is([Type],type text))),
-        typeTransformations = Table.AddColumn(optionsToTransform , "Value", each 
-                                                                if (Type.Is([Type], type nullable number)) or (Type.Is([Type], type number)) 
-                                                                    then { [Name], Number.FromText}
-                                                                else if (Type.Is([Type], type nullable logical)) or (Type.Is([Type], type logical)) 
-                                                                    then { [Name], Logical.FromText}
-                                                                else null),
-
-
-        convertedRecord = Record.TransformFields(extractedOptionsRecord,Table.Column(typeTransformations,"Value"),MissingField.Ignore),
-             optionsRecordStr = Text.Combine(
-        List.Transform(Record.FieldNames(convertedRecord), each Text.From(_ & " = " & Text.From(Record.Field(convertedRecord, _)))),
-        ", ")
-        in
-                if not List.IsEmpty(invalidKeys) then
-                error Error.Record("Expression.Error", 
-                    Text.Format(
-                    "'#{0}' unvalid options were provided. Valid options are: '#{1}'",
-                    {Text.Combine(invalidKeys, ", "), Text.Combine(ValidOptionsMap[Name], ", ")}
-                )
-                   
-                )
-        
-        else
-            convertedRecord;
-
-
-// build settings based on configuration variables
-BuildOdbcConfig = () as record =>
-    let
-        Merge = (previous as record, optional caps as record, optional funcs as record, optional getInfo as record) as record =>
-            let
-                newCaps = if (caps <> null) then previous[SqlCapabilities] & caps else previous[SqlCapabilities],
-                newFuncs = if (funcs <> null) then previous[SQLGetFunctions] & funcs else previous[SQLGetFunctions],
-                newGetInfo = if (getInfo <> null) then previous[SQLGetInfo] & getInfo else previous[SQLGetInfo]
-            in
-                [SqlCapabilities = newCaps, SQLGetFunctions = newFuncs, SQLGetInfo = newGetInfo],
-        defaultConfig = [
-            SqlCapabilities = [],
-            SQLGetFunctions = [],
-            SQLGetInfo = []
-        ],
-        withParams =
-            if (Config_UseParameterBindings = false) then
-                let
-                    caps = [
-                        SupportsNumericLiterals = true,
-                        SupportsStringLiterals = true,
-                        SupportsOdbcDateLiterals = true,
-                        SupportsOdbcTimeLiterals = true,
-                        SupportsOdbcTimestampLiterals = true
-                    ],
-                    funcs = [
-                        SQL_API_SQLBINDPARAMETER = false
-                    ]
-                in
-                    Merge(defaultConfig, caps, funcs)
-            else
-                defaultConfig,
-        withEscape =
-            if (Config_StringLiterateEscapeCharacters <> null) then
-                let
-                    caps = [
-                        StringLiteralEscapeCharacters = Config_StringLiterateEscapeCharacters
-                    ]
-                in
-                    Merge(withParams, caps)
-            else
-                withParams,
-        withLimitClauseKind = let caps = [
-            LimitClauseKind = Config_LimitClauseKind
-        ] in Merge(withEscape, caps),
-        withCastOrConvert =
-            if (Config_UseCastInsteadOfConvert <> null) then
-                let
-                    value =
-                        if (Config_UseCastInsteadOfConvert = true) then
-                            ODBC[SQL_FN_CVT][SQL_FN_CVT_CAST]
-                        else
-                            ODBC[SQL_FN_CVT][SQL_FN_CVT_CONVERT],
-                    getInfo = [
-                        SQL_CONVERT_FUNCTIONS = value
-                    ]
-                in
-                    Merge(withLimitClauseKind, null, null, getInfo)
-            else
-                withLimitClauseKind,
-        withSqlConformance =
-            if (Config_SqlConformance <> null) then
-                let
-                    getInfo = [
-                        SQL_SQL_CONFORMANCE = Config_SqlConformance
-                    ]
-                in
-                    Merge(withCastOrConvert, null, null, getInfo)
-            else
-                withCastOrConvert
-    in
-        withSqlConformance;
 
 ValidateOptions = (options as nullable record, validOptionsMap as table) as record =>
     let
@@ -762,6 +202,7 @@ ValidateOptions = (options as nullable record, validOptionsMap as table) as reco
 //
 // Load common library functions
 //
+
 Extension.LoadFunction = (name as text) =>
     let
         binary = Extension.Contents(name), asText = Text.FromBinary(binary)
@@ -773,21 +214,7 @@ Diagnostics = Extension.LoadFunction("Diagnostics.pqm");
 
 Diagnostics.LogValue = if (EnableTraceOutput) then Diagnostics[LogValue] else (prefix, value) => value;
 
-// OdbcConstants contains numeric constants from the ODBC header files, and a
-// helper function to create bitfield values.
-ODBC = Extension.LoadFunction("OdbcConstants.pqm");
-
-/****************************************
- * ADBC / Arrow Flight SQL implementation ("2.0")
- *
- * ClickHouse does NOT implement CommandGetXdbcTypeInfo, so Power BI's automatic
- * (Adbc.DataSource) type resolution fails for every column ("Unable to understand the
- * type for column"). Instead we use Adbc.Connection and derive each table's column types
- * ourselves from `DESCRIBE TABLE`, mapping ClickHouse type strings to M types. Query
- * folding is provided by SqlView.Generator + ClickHouseSqlGenerator.pqm.
- ****************************************/
-
-// Loads a .pqm module that evaluates to a value (kept for the later folding work).
+// Load a module file as an M expression (used for the SQL generator).
 Extension.LoadExpression = (name as text) =>
     let
         binary = Extension.Contents(name), asText = Text.FromBinary(binary)
@@ -795,7 +222,7 @@ Extension.LoadExpression = (name as text) =>
         Expression.Evaluate(asText, #shared);
 
 // Adbc.Connection is provided by the host mashup engine. Resolve defensively so the
-// connector still loads (and the ODBC path keeps working) where it is unavailable.
+// connector loads with a clear error where it is unavailable (older hosts).
 Adbc.Connection =
     try
         #shared[Adbc.Connection]
@@ -815,7 +242,7 @@ SqlView.Generator =
 // ClickHouse SQL dialect overrides (Sql92 base + ClickHouse), consumed by SqlView.Generator.
 ClickHouseSqlGenerator = Extension.LoadExpression("ClickHouseSqlGenerator.pqm");
 
-// Standard navigation-table wrapper.
+
 Table.ToNavigationTable = (
     table as table,
     keyColumns as list,
@@ -1030,7 +457,7 @@ ClickHouseAdbcConnection = (server as text, port as number, optional database as
             #"adbc.flight.sql.rpc.with_cookie_middleware" = "true",
             // Client identification, recorded in system.query_log.client_name on servers that
             // read this header; older servers ignore unknown gRPC metadata (harmless).
-            #"adbc.flight.sql.rpc.call_header.x-clickhouse-client-name" = "PowerBi/" & ConnectorVersion & "-adbc"
+            #"adbc.flight.sql.rpc.call_header.x-clickhouse-client-name" = "PowerBi/" & ConnectorVersion 
         ],
         Connection = Adbc.Connection(Driver, ConnectionString, [], [ConnectionPoolType = 2]),
         Exec = (sql as text, isMeta as logical) as table =>

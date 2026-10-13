@@ -1,5 +1,5 @@
-﻿// Use this file to write queries to test your data connector
+﻿// Test query for the ClickHouse Arrow Flight connector
 let
-    result = ClickHouse.Contents("localhost",8123,"default")
+    result = ClickHouseArrowFlight.Database("localhost", 9005, "default")
 in
     result

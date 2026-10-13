@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build ClickHouse.mez (flat zip of the connector sources). Usage: ./build-mez.sh [outdir]
+# Build ClickHouse.mez (flat zip of the Arrow Flight connector sources). Usage: ./build-mez.sh [outdir]
 set -eu
 cd "$(dirname "$0")"
 out="${1:-.}"

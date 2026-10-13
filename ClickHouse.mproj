@@ -18,7 +18,7 @@
     <SuppressCellErrors>False</SuppressCellErrors>
     <MaxRows>1000</MaxRows>
     <ExtensionProject>Yes</ExtensionProject>
-    <Name>ClickHouse</Name>
+    <Name>ClickHouseArrowFlight</Name>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>false</DebugSymbols>
@@ -73,9 +73,6 @@
       <SubType>Code</SubType>
     </Content>
     <Compile Include="Diagnostics.pqm">
-      <SubType>Content</SubType>
-    </Compile>
-    <Compile Include="OdbcConstants.pqm">
       <SubType>Content</SubType>
     </Compile>
     <Compile Include="FlightSqlAdbcConfig.pqm">
