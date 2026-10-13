@@ -1,9 +1,9 @@
-﻿// Bootstrap for the ADBC / Arrow Flight SQL implementation (Implementation = "2.0").
+﻿// Bootstrap for the ClickHouse Arrow Flight connector.
 // Adjust Server/Port to your ClickHouse instance and run Tests/Fixtures/seed.sql first.
 let
     Server = "localhost",
     Port = 9007,
-    Source = ClickHouse.Database(Server, Port, "pqtest", [Implementation = "2.0"]),
+    Source = ClickHouseArrowFlight.Database(Server, Port, "pqtest"),
     Db = Source{[Name = "pqtest"]}[Data]
 in
     [

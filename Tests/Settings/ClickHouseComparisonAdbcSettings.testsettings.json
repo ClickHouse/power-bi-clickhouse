@@ -1,6 +1,0 @@
-{
-    "FailOnMissingOutputFile": false,
-    "QueryFilePath": "../TestSuites/Comparison",
-    "ParameterQueryFilePath": "../ParameterQueries/ClickHouseAdbc.parameterquery.pq",
-    "TestNamePrefix": "Adbc"
-}

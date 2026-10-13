@@ -18,7 +18,6 @@ Tests/
     Folding/               filter / group-by / sort / distinct fold correctly
     KnownIssues/           regression guards for bugs fixed during development
     Functions/             function coverage (aggregates, dates, text)
-    Comparison/            ODBC vs ADBC same-results checks
 ```
 
 ## Setup
@@ -26,8 +25,7 @@ Tests/
 1. **Seed the server:** run `Fixtures/seed.sql` against your ClickHouse
    (`clickhouse-client < seed.sql`). All data is deterministic — snapshots are stable.
 2. **Point the bootstraps at your server:** edit `Server`/`Port` at the top of
-   `ParameterQueries/*.parameterquery.pq` (ADBC = Arrow Flight port; ODBC = HTTP port)
-   and in `TestSuites/Comparison/AdbcOdbcSameResults.query.pq`.
+   `ParameterQueries/ClickHouseAdbc.parameterquery.pq` (Arrow Flight port).
 3. **Build the connector** (`ClickHouse.mez`) and configure the SDK extension's extension path.
 4. **Set credentials** once via the SDK's *Power Query: Set Credential* command
    (Basic auth for the ClickHouse data source).
@@ -60,7 +58,6 @@ destination, the Windows paths, and the ClickHouse host address as seen from Win
 | KnownIssues/NestedAggregation | Total | 618.75 |
 | Functions/Aggregates | SumI32 / AvgF64 / SumDec / CountAll | 100000 / 0.7 / -11302.25 / 5 |
 | Functions/TextFunctions | Upper / Len / Pos / Starts | HELLO WORLD / 11 / 6 / true |
-| Comparison/AdbcOdbcSameResults | all fields | true |
 | Folding/MultiValueFilter | Buckets / First / GrandTotal | 4 / high / 93.12 |
 | Folding/MinMaxDatesText | MinDate / MaxDate / MaxText | 2020-01-01 / 2026-12-31 / a-b-c |
 | Folding/AverageTypes | AvgEventsId / AvgDecimal | 49.5 / -2260.45 |
