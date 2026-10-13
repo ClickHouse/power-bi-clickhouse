@@ -1,50 +1,37 @@
 <p align="center" style="font-size:300%">
 <img src=".static/clickhouse.png" width="200px" align="center">
 <img src=".static/powerbi.svg" width="200px" align="center">
-<h1 align="center">ClickHouse Connector for Power BI</h1>
+<h1 align="center">ClickHouse Arrow Flight Connector for Power BI (Beta)</h1>
 </p>
 <br/>
 
 ## Introduction
 
-This MS certified connector allows you to retrieve data from ClickHouse directly into Power BI for analysis and visualization.
+A dedicated Power BI connector for ClickHouse's [Arrow Flight SQL interface](https://clickhouse.com/docs/interfaces/arrowflight), built on the Microsoft-distributed ADBC driver. It returns a foldable navigation table: Power Query and DAX operations are pushed down into ClickHouse SQL (DirectQuery supported).
 
-## Features
+The classic, generally-available ODBC-based connector ("ClickHouse") lives on the `main` branch and is unchanged; this connector is its Flight-SQL successor and does not require an on-premises data gateway host with a ClickHouse driver — the ADBC driver ships inside Power BI.
 
-- **Direct Query**: The connector supports Direct Query mode, allowing you to work with large datasets in real-time.
-- **ODBC Driver Configuration**: Customize the ODBC driver settings to meet your specific requirements.
-- **Microsoft Certification**: This connector was certified by the Connectors team at Microsoft. It is available by default in all latest PowerBI distributions.
+## Requirements
 
-## Installation
+- ClickHouse server with the Arrow Flight SQL interface enabled (`arrowflight_port`)
+- Power BI Desktop 2.155 (June 2026) or later
+- Connections are TLS-encrypted by default (set option `SSLMode = "none"` to explicitly opt out for plaintext dev servers; a credential that requires encryption always wins)
 
-The connector is available in Microsoft recent distributions. If you can't update to one of those, please refer the next section: [Manual Installation](#manual-installation).
+## Usage
 
+Get Data → **ClickHouse Arrow Flight** → server + `arrowflight_port` (+ optional database). Options record supports `HighPrecision` (default `true`: ClickHouse Decimal stays exact in aggregates) and `SSLMode`.
 
-1. Download and install the [ClickHouse ODBC driver](https://github.com/ClickHouse/clickhouse-odbc).
-1. Click on "Get Data" and search for "ClickHouseODBCConnector."
-1. Enter the required connection details, such as server name, port, database name, and optional connection options.
-1. Enter your username and password.
-1. Choose the desired data retrieval mode: Import or Direct Query.
-1. Click "OK" to establish the connection and start working with ClickHouse data in Power BI.
+```
+ClickHouseArrowFlight.Database("my-server", 9005, "default")
+```
 
+## Known limitations
 
-## Manual Installation
+- Plain `DateTime` columns surface as Int64 epoch seconds (use `DateTime64`); fix tracked server-side.
+- Outer merges are evaluated by Power Query rather than folded (`join_use_nulls` cannot be pinned per connection yet).
+- Per-connection server settings are not yet supported by the server's Flight interface.
+- Column types the ADBC reader cannot fetch (FixedString, UUID, IPv6, Int128/256, Decimal with precision > 38, JSON) are excluded from tables; reach them via `Value.NativeQuery` with a server-side conversion.
 
-1. Download and install the [ClickHouse ODBC driver](https://github.com/ClickHouse/clickhouse-odbc).
-1. Create the following directory for the custom connector "Documents\Power BI Desktop\Custom Connectors" directory.
-1. Download the latest release of the Power BI Connector for ClickHouse from the [Releases](https://github.com/ClickHouse/power-bi-clickhouse/releases) section and place it in the directory you just created.
-1. Enable unsigned connectors loading in File &rarr; Options and settings &rarr; Options &rarr; Security &rarr; Data Extensions &rarr; Allow any extension to load without warning or validation.
-1. Continue to step 2 in the previous section.
+## Development and testing
 
-
-## Power BI Service
-
-For cloud usage, please refer to [Microsoft documentation](https://learn.microsoft.com/en-us/power-bi/connect-data/service-gateway-custom-connectors#enable-and-use-custom-connectors) for information on enabling custom data connectors in the cloud using on-premises data gateway.
-
-## Documentation
-
-For more information about the ClickHouseODBCConnector functions, configuration options, and usage examples, refer to the [official documentation](https://clickhouse.com/docs/en/integrations/powerbi).
-
-## Support and Feedback
-
-If you encounter any issues or have feedback regarding the Power BI Connector for ClickHouse, please [submit an issue on GitHub](https://github.com/ClickHouse/power-bi-clickhouse/issues).
+`./build-mez.sh` builds `ClickHouse.mez`. The automated suite (37 query tests + connection-validation scenarios, run against a ClickHouse version matrix with server-side verification of the generated SQL) lives under `Tests/` — see `Tests/README.md`.
