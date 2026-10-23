@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!-- 
     Microsoft ResX Schema 
@@ -118,12 +118,12 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="ButtonHelp" xml:space="preserve">
-    <value>Connect to ClickHouse</value>
+    <value>Connect to ClickHouse over Arrow Flight SQL</value>
   </data>
   <data name="ButtonTitle" xml:space="preserve">
-    <value>ClickHouse</value>
+    <value>ClickHouse Arrow Flight</value>
   </data>
   <data name="DataSourceLabel" xml:space="preserve">
-    <value>ClickHouse</value>
+    <value>ClickHouse Arrow Flight</value>
   </data>
 </root>

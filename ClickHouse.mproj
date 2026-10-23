@@ -7,7 +7,7 @@
     <RootNamespace>MyRootNamespace</RootNamespace>
     <AssemblyName>MyAssemblyName</AssemblyName>
     <EnableUnmanagedDebugging>False</EnableUnmanagedDebugging>
-    <AllowNativeQuery>False</AllowNativeQuery>
+    <AllowNativeQuery>True</AllowNativeQuery>
     <AsAction>False</AsAction>
     <FastCombine>False</FastCombine>
     <ClearLog>False</ClearLog>
@@ -18,7 +18,7 @@
     <SuppressCellErrors>False</SuppressCellErrors>
     <MaxRows>1000</MaxRows>
     <ExtensionProject>Yes</ExtensionProject>
-    <Name>ClickHouse</Name>
+    <Name>ClickHouseArrowFlight</Name>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>false</DebugSymbols>
@@ -75,7 +75,16 @@
     <Compile Include="Diagnostics.pqm">
       <SubType>Content</SubType>
     </Compile>
-    <Compile Include="OdbcConstants.pqm">
+    <Compile Include="FlightSqlAdbcConfig.pqm">
+      <SubType>Content</SubType>
+    </Compile>
+    <Compile Include="TypeInfo.pqm">
+      <SubType>Content</SubType>
+    </Compile>
+    <Compile Include="SqlGeneratorCommon.pqm">
+      <SubType>Content</SubType>
+    </Compile>
+    <Compile Include="ClickHouseSqlGenerator.pqm">
       <SubType>Content</SubType>
     </Compile>
   </ItemGroup>

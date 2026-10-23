@@ -402,3 +402,12 @@ FodyWeavers.xsd
 *.iws
 *.ipr
 
+# local build artifact
+ClickHouse.mez
+# machine-specific test-runner settings
+Tests/run-tests.env
+Tests/Diagnostics/
+# local VM deployment helpers
+Redeploy-ClickHouse.*
+Install-ClickHouse.cmd
+ClickHouse-tests-bundle.zip

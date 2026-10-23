@@ -1,0 +1,1 @@
+[ Upper = "HELLO WORLD", Lower = "hello world", Len = 11, Left5 = "Hello", Right5 = "World", Replaced = "Hell0 W0rld", PosFound = 6, PosNotFound = -1 ] 

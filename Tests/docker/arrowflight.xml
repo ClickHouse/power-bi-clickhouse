@@ -1,0 +1,10 @@
+<clickhouse>
+    <arrowflight_port>9407</arrowflight_port>
+    <!-- TLS only: the connector has no plaintext mode. Certificates come from the
+         CH_TLS_DIR mount (see docker-compose.yml / run-tests.env). -->
+    <arrowflight>
+        <enable_ssl>true</enable_ssl>
+        <ssl_cert_file>/certs/server.crt</ssl_cert_file>
+        <ssl_key_file>/certs/server.key</ssl_key_file>
+    </arrowflight>
+</clickhouse>
