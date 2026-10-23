@@ -33,7 +33,7 @@ DatabaseType = type function (
     ]),
     optional options as (type record meta [
         Documentation.FieldCaption = "Options",
-        Documentation.FieldDescription = "Optional record: HighPrecision (default true: ClickHouse Decimal stays exact in aggregates; false: downcast to double); SSLMode (""none"" connects WITHOUT encryption — explicit opt-out; connections are encrypted by default)"
+        Documentation.FieldDescription = "Optional record: HighPrecision (default true: ClickHouse Decimal stays exact in aggregates; false: downcast to double)"
     ]))
     as table meta [
         Documentation.Name = "ClickHouse Arrow Flight",
@@ -56,15 +56,6 @@ ValidOptionsMap = #table(
             "Keep Decimal exact in aggregates/arithmetic (true, default) vs downcast to double (false)",
             true,
             each _ = null or _ = true or _ = false
-        },
-        {
-            // Explicit opt-out from TLS for plaintext dev servers; see the Encrypt logic in
-            // ClickHouseAdbcConnection for the credential-precedence rules.
-            "SSLMode",
-            type nullable text,
-            "Set to none to connect WITHOUT encryption (explicit opt-out; encrypted by default)",
-            null,
-            each _ = null or _ = "none"
         }
     }
 );
@@ -73,7 +64,7 @@ DatabaseCoreImplementation = (server as text, port as number, optional database 
     let
         ValidatedOptions = ValidateOptions(options, ValidOptionsMap)
     in
-        ClickHouseAdbcConnection(server, port, database, ValidatedOptions[HighPrecision]?, ValidatedOptions[SSLMode]?);
+        ClickHouseAdbcConnection(server, port, database, ValidatedOptions[HighPrecision]?);
 
 ClickHouseArrowFlight = [
     // Set the TestConnection handler to enable gateway support.
@@ -98,7 +89,6 @@ ClickHouseArrowFlight = [
         //Windows = [],
         UsernamePassword = []
     ],
-    SupportsEncryption = true,
     Label = Extension.LoadString("DataSourceLabel")
 ];
 
@@ -107,7 +97,7 @@ ClickHouseArrowFlight = [
 // (there is no second transport to fall back to in this connector).
 [DataSource.Kind = "ClickHouseArrowFlight"]
 shared ClickHouseArrowFlight.ValidateConnection = (server as text, port as number, optional database as text) as number =>
-    Table.RowCount(ClickHouseAdbcConnection(server, port, database, null, null));
+    Table.RowCount(ClickHouseAdbcConnection(server, port, database, null));
 
 ClickHouseArrowFlight.Publish = [
     // This connector is the Beta home of the Arrow Flight SQL implementation; the classic
@@ -401,7 +391,7 @@ ClickHouseDatabasesNav = (context as record, optional database as nullable text)
         Table.ToNavigationTable(withIsLeaf, {"Name"}, "Name", "Data", "ItemKind", "ItemName", "IsLeaf");
 
 // ADBC entry point: open the Flight SQL connection, wire up folding, return the navigation table.
-ClickHouseAdbcConnection = (server as text, port as number, optional database as text, optional highPrecision as logical, optional sslMode as text) as table =>
+ClickHouseAdbcConnection = (server as text, port as number, optional database as text, optional highPrecision as logical) as table =>
     let
         Driver = [
             Name = "FlightSqlClickHouse",
@@ -411,33 +401,16 @@ ClickHouseAdbcConnection = (server as text, port as number, optional database as
             EntryPoint = "FlightSqlDriverInit"
         ],
         Credential = Extension.CurrentCredential(),
-        // Honor the encryption requirement from the credential: grpc+tls with the driver's
-        // default certificate and hostname validation (system trust store). Absent an explicit
-        // choice, default to encrypted. The connection is never SILENTLY downgraded to
-        // plaintext. SSLMode=none in the connection options is the user-explicit opt-out
-        // (Power BI Desktop exposes no UI for the credential's EncryptConnection flag on
-        // custom connectors), but the CREDENTIAL always takes precedence: options live in the
-        // report's M text and must not be able to downgrade a credential that explicitly
-        // requires encryption — that combination raises a conflict error instead (clear the
-        // data source's permissions or disable its encryption requirement to proceed).
-        // Known limitation: TestConnection cannot see connection options (the data-source
-        // path excludes them), so gateway credential validation probes encrypted-first and
-        // fails against plaintext-only Flight endpoints configured via SSLMode=none.
-        Encrypt =
-            if sslMode = "none" then
-                (if Credential[EncryptConnection]? = true then
-                    error Error.Record("DataSource.Error",
-                        "SSLMode=none conflicts with this credential's encrypted-connection requirement. Remove the option, or clear the data source permissions and store the credential without requiring encryption.",
-                        null)
-                 else false)
-            else Credential[EncryptConnection]? ?? true,
-        Scheme = if Encrypt then "grpc+tls://" else "grpc://",
+        // TLS only: every connection is grpc+tls with the driver's default certificate and
+        // hostname validation (system trust store). There is no plaintext mode and no
+        // downgrade path of any kind — a server without TLS on its Flight endpoint fails
+        // loudly with a handshake error.
         ConnectionString = [
             // NB: only the uri is traced here — credentials must never be logged.
             uri = Diagnostics.LogValue(
                 "ClickHouseAdbcConnection: uri (database=" & (database ?? "<null>")
                     & ", highPrecision=" & (if highPrecision = false then "false" else "true") & ")",
-                Scheme & server & ":" & Text.From(port)
+                "grpc+tls://" & server & ":" & Text.From(port)
             ),
             // Credentials ride on EVERY call as a static Basic authorization header instead of
             // the handshake-issued bearer token. The server's bearer tokens live in process

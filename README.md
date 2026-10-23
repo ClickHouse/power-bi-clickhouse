@@ -15,11 +15,11 @@ The classic, generally-available ODBC-based connector ("ClickHouse") lives on th
 
 - ClickHouse server with the Arrow Flight SQL interface enabled (`arrowflight_port`)
 - Power BI Desktop 2.155 (June 2026) or later
-- Connections are TLS-encrypted by default (set option `SSLMode = "none"` to explicitly opt out for plaintext dev servers; a credential that requires encryption always wins)
+- Connections are **always TLS-encrypted** (certificate and hostname validated against the system trust store) — there is no plaintext mode; the server's Flight endpoint must be configured with TLS (`arrowflight.enable_ssl`)
 
 ## Usage
 
-Get Data → **ClickHouse Arrow Flight** → server + `arrowflight_port` (+ optional database). Options record supports `HighPrecision` (default `true`: ClickHouse Decimal stays exact in aggregates) and `SSLMode`.
+Get Data → **ClickHouse Arrow Flight** → server + `arrowflight_port` (+ optional database). Options record supports `HighPrecision` (default `true`: ClickHouse Decimal stays exact in aggregates).
 
 ```
 ClickHouseArrowFlight.Database("my-server", 9005, "default")
