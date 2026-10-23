@@ -13,6 +13,10 @@ x-ch-common: &ch-common
   volumes:
     - ./arrowflight.xml:/etc/clickhouse-server/config.d/arrowflight.xml:ro
     - ../Fixtures/seed.sql:/seed.sql:ro
+    # TLS certs for the Flight endpoint (the connector is TLS-only); directory comes from
+    # run-tests.env (CH_TLS_DIR) — server.crt/server.key, SANs must cover the host address
+    # the Windows test machine uses.
+    - ${CH_TLS_DIR:?set CH_TLS_DIR in Tests/run-tests.env}:/certs:ro
   ulimits:
     nofile: { soft: 262144, hard: 262144 }
   healthcheck:

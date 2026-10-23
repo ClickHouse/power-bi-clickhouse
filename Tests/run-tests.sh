@@ -27,6 +27,8 @@ SSH_OPTS=("${KEYOPT[@]}" -p "$VM_SSH_PORT" "$VM_SSH_DEST")
 : "${PQTEST:?set PQTEST (Windows path of PQTest.exe) in Tests/run-tests.env}"
 # CH_HOST may come from the env file OR the --host flag; validated after argument parsing.
 HOST="${CH_HOST:-}"
+# TLS certificates for the dockerized Flight endpoints (the connector is TLS-only)
+export CH_TLS_DIR="${CH_TLS_DIR:-}"
 
 MODE=""; VERSIONS=""; KEEP=0
 while [ $# -gt 0 ]; do
@@ -72,19 +74,18 @@ build_and_push_mez() {
   scp -q "${KEYOPT[@]}" -P "$VM_SSH_PORT" "$SCRIPT_DIR/Settings/"*.testsettings.json "$VM_SSH_DEST:$VM_TESTS/Tests/Settings/"
 }
 
-run_target() { # $1 = label, $2 = flight port, $3 = encrypt (true/false)
-  local label="$1" port="$2" enc="${3:-false}" rc=0
-  echo "=== [$label] flight $HOST:$port (encrypt=$enc)"
-  ssh "${SSH_OPTS[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File $VM_TESTS/run-suites.ps1 -TargetHost $HOST -Port $port -Label $label -PqTest \"$PQTEST\" -TestsRoot \"$VM_TESTS\" -Encrypt $enc" 2>/dev/null || rc=1
-  ssh "${SSH_OPTS[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File $VM_TESTS/run-connection-tests.ps1 -TargetHost $HOST -FlightPort $port -HttpPort $(http_port_for "$label") -Label $label -PqTest \"$PQTEST\" -TestsRoot \"$VM_TESTS\" -FlightEncrypt $enc" 2>/dev/null || rc=1
+run_target() { # $1 = label, $2 = flight port
+  local label="$1" port="$2" rc=0
+  echo "=== [$label] flight $HOST:$port"
+  ssh "${SSH_OPTS[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File $VM_TESTS/run-suites.ps1 -TargetHost $HOST -Port $port -Label $label -PqTest \"$PQTEST\" -TestsRoot \"$VM_TESTS\"" 2>/dev/null || rc=1
+  ssh "${SSH_OPTS[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File $VM_TESTS/run-connection-tests.ps1 -TargetHost $HOST -FlightPort $port -Label $label -PqTest \"$PQTEST\" -TestsRoot \"$VM_TESTS\"" 2>/dev/null || rc=1
   return $rc
 }
 
 build_and_push_mez
 
 if [ "$MODE" = local ]; then
-  # the local dev server runs Arrow Flight behind TLS (test CA trusted on the VM)
-  run_target "local" 9007 true
+  run_target "local" 9007
 else
   [ "$VERSIONS" = all ] && VERSIONS="26.5 26.6 26.8 latest"
   cd "$SCRIPT_DIR/docker"
