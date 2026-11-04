@@ -9,6 +9,8 @@
 
 This MS certified connector allows you to retrieve data from ClickHouse directly into Power BI for analysis and visualization.
 
+The connector works with both ClickHouse Cloud and self-hosted ClickHouse. You can [start a free Cloud trial](https://console.clickhouse.cloud/signUp?utm_medium=referral&utm_source=github&utm_campaign=readme&utm_content=power-bi-clickhouse) or [install ClickHouse](https://clickhouse.com/docs/get-started/setup/install) locally.
+
 ## Features
 
 - **Direct Query**: The connector supports Direct Query mode, allowing you to work with large datasets in real-time.
